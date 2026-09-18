@@ -99,7 +99,24 @@ public partial class LibraryView : UserControl
         _liveTimer.Tick += async (_, _) => await LiveProbeAsync();
         _liveTimer.Start();
         _ = LiveProbeAsync();
-        _ = AutoDetectAsync();
+        if (!s.AboutShown)
+        {
+            // First launch: show About (support links), then start detection.
+            Dispatcher.UIThread.Post(async () =>
+            {
+                var owner = Top as Window;
+                if (owner != null)
+                    await new AboutWindow().ShowDialog(owner);
+                var st = AppSettings.Load();
+                st.AboutShown = true;
+                st.Save();
+                _ = AutoDetectAsync();
+            });
+        }
+        else
+        {
+            _ = AutoDetectAsync();
+        }
         this.FindControl<Button>("BtnAddDrive").Click += async (_, _) => await AddDriveAsync();
         this.FindControl<Button>("BtnTest").Click += async (_, _) => await TestConnectionAsync();
         this.FindControl<Button>("BtnScan").Click += async (_, _) => await ScanAsync();

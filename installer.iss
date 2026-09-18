@@ -24,7 +24,7 @@ Name: "{group}\PKG Sender"; Filename: "{app}\PkgSender.exe"
 Name: "{autodesktop}\PKG Sender"; Filename: "{app}\PkgSender.exe"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a &desktop icon"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a &desktop icon"; Flags: checkedonce
 
 [Run]
 ; inbound rules so the console can pull PKGs from the PC file server
