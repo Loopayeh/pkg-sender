@@ -1,0 +1,35 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="PkgSender.Views.AboutWindow"
+        Title="About PKG Sender" Width="380" Height="540"
+        CanResize="False" ShowInTaskbar="False"
+        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
+        WindowStartupLocation="CenterOwner">
+  <Window.Styles>
+    <Style Selector="Button.ghost">
+      <Setter Property="Background" Value="#404040"/>
+      <Setter Property="Foreground" Value="#F1F3F8"/>
+      <Setter Property="FontWeight" Value="Normal"/>
+    </Style>
+  </Window.Styles>
+  <StackPanel Spacing="4" Margin="24,20" HorizontalAlignment="Center">
+    <Image Source="/Assets/assets_about.png" Width="190" Stretch="Uniform" HorizontalAlignment="Center"/>
+    <TextBlock Name="TitleText" Text="PKG Sender" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+    <TextBlock Text="by Loopayeh" FontSize="12" Foreground="#8B93A5" HorizontalAlignment="Center"/>
+    <TextBlock Text="PKG install over LAN." FontSize="12" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+    <TextBlock Text="If you enjoy what I build and want to support my work,&#x0a;you can donate"
+               FontSize="12" TextAlignment="Center" Margin="0,8,0,0" TextWrapping="Wrap"/>
+    <TextBlock Text="Every bit of support means a lot. &#x1F499;" FontSize="12" HorizontalAlignment="Center"/>
+    <TextBlock Text="USDT (BEP-20) — click address to copy:" FontSize="11" Foreground="#8B93A5" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+    <Button Name="AddrButton" Content="0x839a30D52Ef7D2b53e818b9931efd7FE6F472e50"
+            FontSize="10" Background="Transparent" Foreground="#F1F3F8"
+            BorderThickness="0" HorizontalAlignment="Center" Cursor="Hand"/>
+    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" Margin="0,10,0,0">
+      <Button Name="LinksButton" Content="Links  ↗" MinWidth="100" Classes="ghost"/>
+      <Button Name="SupportButton" Content="Support  ↗" MinWidth="100" Classes="ghost"/>
+    </StackPanel>
+    <CheckBox Name="UpdateCheckBox" Content="Check for updates on startup" FontSize="11"
+              HorizontalAlignment="Center" Margin="0,8,0,0"/>
+    <Button Name="CloseButton" Content="Close" MinWidth="120" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+  </StackPanel>
+</Window>

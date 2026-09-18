@@ -1,0 +1,26 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="PkgSender.Views.UpdateDialog"
+        Title="Update available" Width="440" Height="380"
+        CanResize="False" ShowInTaskbar="False"
+        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
+        WindowStartupLocation="CenterOwner">
+  <Window.Styles>
+    <Style Selector="Button.ghost">
+      <Setter Property="Background" Value="#404040"/>
+      <Setter Property="Foreground" Value="#F1F3F8"/>
+      <Setter Property="FontWeight" Value="Normal"/>
+    </Style>
+  </Window.Styles>
+  <StackPanel Spacing="6" Margin="16">
+    <TextBlock Text="A new version is available:" FontSize="12" Foreground="#8B93A5"/>
+    <TextBlock Name="VersionText" FontSize="14" FontWeight="Bold"/>
+    <TextBox Name="NotesBox" Height="160" IsReadOnly="True" TextWrapping="Wrap"
+             Background="#2A2A2A" Foreground="#F1F3F8" BorderThickness="0"/>
+    <TextBlock Name="ProgressText" FontSize="11" Foreground="#8B93A5"/>
+    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+      <Button Name="LaterButton" Content="Later" Classes="ghost" MinWidth="90"/>
+      <Button Name="InstallButton" Content="Download + Install" MinWidth="150"/>
+    </StackPanel>
+  </StackPanel>
+</Window>

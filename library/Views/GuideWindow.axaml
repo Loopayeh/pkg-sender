@@ -1,0 +1,35 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="PkgSender.Views.GuideWindow"
+        Title="PKG Sender guide" Width="460" Height="480"
+        CanResize="False" ShowInTaskbar="False"
+        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
+        WindowStartupLocation="CenterOwner">
+  <Grid RowDefinitions="*,Auto" Margin="24,20">
+    <ScrollViewer Grid.Row="0">
+      <StackPanel Spacing="8">
+        <TextBlock Text="Setup" FontSize="16" FontWeight="Bold"/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="1. Jailbreak your PS5 and send pkg-receiver.elf (it ships in the install folder)."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="2. Wait for the console toast “listening on port 12800”."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="3. Put the console on the same network as this PC (Wi-Fi or LAN). No internet needed on the console."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="4. Open PKG Sender — it finds the console by itself and asks to switch if its address changed."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="5. Add a folder with .pkg files, select games, press Install PKG."/>
+        <TextBlock Text="Troubleshooting" FontSize="16" FontWeight="Bold" Margin="0,8,0,0"/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="• “No receiver” — the elf is not running on the console. Send it again."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="• “No network adapter” — this PC has no active LAN/Wi-Fi. Check cable or Wi-Fi."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="• Push goes through but the download never starts — allow inbound TCP port 9898 in Windows Firewall (the installer adds this rule)."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="• Console IP changes often (DHCP) — just reopen the app; it will offer the new address."/>
+      </StackPanel>
+    </ScrollViewer>
+    <Button Grid.Row="1" Name="CloseButton" Content="Close" MinWidth="120" HorizontalAlignment="Center" Margin="0,12,0,0"/>
+  </Grid>
+</Window>

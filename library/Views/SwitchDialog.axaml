@@ -1,0 +1,17 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="PkgSender.Views.SwitchDialog"
+        Title="Console found" Width="400" Height="250"
+        CanResize="False" ShowInTaskbar="False"
+        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
+        WindowStartupLocation="CenterOwner">
+  <StackPanel Spacing="8" Margin="24,20">
+    <TextBlock Text="A console is reachable at a different address." FontSize="14" FontWeight="Bold" TextWrapping="Wrap"/>
+    <TextBlock Name="DetailText" FontSize="12" Foreground="#8B93A5" TextWrapping="Wrap"/>
+    <TextBlock Text="Switch to it?" FontSize="12" Margin="0,4,0,0"/>
+    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,8,0,0">
+      <Button Name="KeepButton" Content="Keep mine" MinWidth="100"/>
+      <Button Name="SwitchButton" Content="Switch" MinWidth="100"/>
+    </StackPanel>
+  </StackPanel>
+</Window>

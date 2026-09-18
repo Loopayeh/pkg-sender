@@ -1,0 +1,93 @@
+using System.Collections.ObjectModel;
+using Avalonia;
+using Avalonia.Media.Imaging;
+using ReactiveUI;
+
+namespace PkgSender.ViewModels;
+
+public sealed class GameItem : ReactiveObject
+{
+    public string Path { get; init; } = "";
+    public string Title { get; init; } = "";
+    public string Meta { get; init; } = "";
+    public string SizeText { get; init; } = "";
+    public long SizeBytes { get; init; }
+    public string Platform { get; init; } = "";
+    public string Format { get; init; } = "pkg";
+    public bool IsFolder { get; init; }
+    public string ContentId { get; init; } = "";
+    public Bitmap? Cover { get; init; }
+    public byte[]? IconData { get; init; }
+    public bool IsPs5 { get; init; }
+    public bool IsPs4 { get; init; }
+    public bool IsDlc { get; init; }
+    // Shape language: cards always rectangular; only the PS5 cover image is round.
+    public CornerRadius CardRadius { get; init; }
+    public CornerRadius ImageRadius { get; init; }
+
+    private bool _isSelected;
+    public bool IsSelected { get => _isSelected; set => this.RaiseAndSetIfChanged(ref _isSelected, value); }
+}
+
+public sealed class QueueItem : ReactiveObject
+{
+    public GameItem Game { get; init; } = null!;
+
+    private string _state = "queued";
+    public string State { get => _state; set => this.RaiseAndSetIfChanged(ref _state, value); }
+
+    private double _percent;
+    public double Percent { get => _percent; set => this.RaiseAndSetIfChanged(ref _percent, value); }
+
+    private string _message = "";
+    public string Message { get => _message; set => this.RaiseAndSetIfChanged(ref _message, value); }
+
+    private bool _canResume;
+    public bool CanResume { get => _canResume; set => this.RaiseAndSetIfChanged(ref _canResume, value); }
+}
+
+public sealed class LibraryViewModel : ReactiveObject
+{
+    private string _psIp = "";
+    public string PsIp { get => _psIp; set => this.RaiseAndSetIfChanged(ref _psIp, value); }
+
+    private string _pcIp = "";
+    public string PcIp { get => _pcIp; set => this.RaiseAndSetIfChanged(ref _pcIp, value); }
+
+    private string _remoteDir = "/data/homebrew";
+    public string RemoteDir { get => _remoteDir; set => this.RaiseAndSetIfChanged(ref _remoteDir, value); }
+
+    private string _search = "";
+    public string Search { get => _search; set => this.RaiseAndSetIfChanged(ref _search, value); }
+
+    private string _platformFilter = "All";
+    public string PlatformFilter { get => _platformFilter; set => this.RaiseAndSetIfChanged(ref _platformFilter, value); }
+
+    private string _sortMode = "Name";
+    public string SortMode { get => _sortMode; set => this.RaiseAndSetIfChanged(ref _sortMode, value); }
+
+    private string _status = "Ready.";
+    public string Status { get => _status; set => this.RaiseAndSetIfChanged(ref _status, value); }
+
+    private string _testResult = "";
+    public string TestResult { get => _testResult; set => this.RaiseAndSetIfChanged(ref _testResult, value); }
+
+    private double _totalProgress;
+    public double TotalProgress { get => _totalProgress; set => this.RaiseAndSetIfChanged(ref _totalProgress, value); }
+
+    private bool _isBusy;
+    public bool IsBusy { get => _isBusy; set => this.RaiseAndSetIfChanged(ref _isBusy, value); }
+
+    private bool _isSending;
+    public bool IsSending { get => _isSending; set => this.RaiseAndSetIfChanged(ref _isSending, value); }
+
+    private string _gamesLabel = "Library";
+    public string GamesLabel { get => _gamesLabel; set => this.RaiseAndSetIfChanged(ref _gamesLabel, value); }
+
+    private string _queueLabel = "Queue is empty";
+    public string QueueLabel { get => _queueLabel; set => this.RaiseAndSetIfChanged(ref _queueLabel, value); }
+
+    public ObservableCollection<GameItem> Games { get; } = new();
+    public ObservableCollection<QueueItem> Queue { get; } = new();
+    public ObservableCollection<string> PcIps { get; } = new();
+}

@@ -1,0 +1,14 @@
+# build outputs
+dist/
+Release/
+Release2/
+bin/
+obj/
+*.pdb
+# local test artifacts
+test-pkgs/
+# installer output (built locally per release)
+PkgSender-Setup-*.exe
+# IDE
+.vs/
+*.user
