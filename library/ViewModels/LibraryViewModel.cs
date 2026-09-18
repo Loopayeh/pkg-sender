@@ -21,6 +21,12 @@ public sealed class GameItem : ReactiveObject
     public bool IsPs5 { get; init; }
     public bool IsPs4 { get; init; }
     public bool IsDlc { get; init; }
+    // Family linking: updates/DLCs of one title stay visibly together.
+    public string FamilyKey { get; init; } = "";
+    public string Role { get; init; } = "Game"; // Game | Patch | DLC
+    public int FamilyCount { get; set; }
+    public bool HasFamily { get; set; }
+    public string FamilyTip { get; set; } = "";
     // Shape language: cards always rectangular; only the PS5 cover image is round.
     public CornerRadius CardRadius { get; init; }
     public CornerRadius ImageRadius { get; init; }
@@ -65,6 +71,9 @@ public sealed class LibraryViewModel : ReactiveObject
 
     private string _sortMode = "Name";
     public string SortMode { get => _sortMode; set => this.RaiseAndSetIfChanged(ref _sortMode, value); }
+
+    private bool _sequentialMode;
+    public bool SequentialMode { get => _sequentialMode; set => this.RaiseAndSetIfChanged(ref _sequentialMode, value); }
 
     private string _status = "Ready.";
     public string Status { get => _status; set => this.RaiseAndSetIfChanged(ref _status, value); }

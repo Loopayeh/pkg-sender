@@ -70,6 +70,7 @@ public partial class LibraryView : UserControl
                 ApplyFilter();
         };
         this.FindControl<Button>("BtnAddFolder").Click += async (_, _) => await AddFolderAsync("Add a folder to scan for games");
+        this.FindControl<Button>("BtnClearSearch").Click += (_, _) => _m.Search = "";
         // Auto-detect LAN addresses: PC IP is picked, never typed.
         _nets = LoopDPI.Core.NetDiscovery.GetLanNetworks();
         RefreshPcIps(selectForPs: _m.PsIp);
@@ -140,12 +141,22 @@ public partial class LibraryView : UserControl
         };
         this.FindControl<Button>("BtnClearDone").Click += (_, _) =>
         {
-            // Finished rows only: an active download is never touched.
-            for (int i = _m.Queue.Count - 1; i >= 0; i--)
+            // Finished rows go; stuck rows (sending/queued with no live
+            // transfer behind them) go too. Active downloads are untouched.
+            lock (_runLock)
             {
-                string st = _m.Queue[i].State;
-                if (st == "sent" || st == "failed")
-                    _m.Queue.RemoveAt(i);
+                for (int i = _m.Queue.Count - 1; i >= 0; i--)
+                {
+                    var qi = _m.Queue[i];
+                    if (qi.State == "sent" || qi.State == "failed")
+                    {
+                        _m.Queue.RemoveAt(i);
+                    }
+                    else if (!_activeIds.ContainsKey(qi) && !_runQueue.Contains(qi))
+                    {
+                        _m.Queue.RemoveAt(i); // orphaned row, no worker owns it
+                    }
+                }
             }
             UpdateQueueLabel();
         };
@@ -158,9 +169,12 @@ public partial class LibraryView : UserControl
                 g.IsSelected = selected.Contains(g);
             UpdateGamesLabel();
         };
+        // 🔗 chip inside cards: filter the library to that family.
+        this.FindControl<ListBox>("GamesList").AddHandler(Button.ClickEvent, OnCardLinkClick);
         // Per-row Resume buttons live inside the queue DataTemplate.
         this.FindControl<ListBox>("QueueList").AddHandler(Button.ClickEvent, OnQueueButtonClick);
-        _ = ScanAsync();
+        // No auto-scan at startup: the user presses Scan when ready.
+        _m.Status = _roots.Count == 0 ? "Add a folder or drives first." : "Press Scan to load the library.";
     }
 
     private static string AddrOf(string? item)
@@ -314,6 +328,16 @@ public partial class LibraryView : UserControl
         finally { _liveBusy = false; }
     }
 
+    private void OnCardLinkClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (e.Source is Button { Name: "LinkBtn", DataContext: GameItem g } && !string.IsNullOrEmpty(g.FamilyKey))
+        {
+            // Toggle: click again to go back to the full library.
+            _m.Search = _m.Search == g.FamilyKey ? "" : g.FamilyKey;
+            e.Handled = true;
+        }
+    }
+
     private void OnQueueButtonClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)    {
         if (e.Source is Button { DataContext: QueueItem qi })
             ResumeRow(qi);
@@ -438,11 +462,15 @@ public partial class LibraryView : UserControl
                         ? g.Info.TitleId : g.Info.ContentId;
                     string gver = string.IsNullOrWhiteSpace(g.Info.Version)
                         ? "" : " • v" + g.Info.Version.TrimStart('v', 'V');
+                    string role = g.Info.IsDlc ? "DLC"
+                        : g.Info.ContentType.Equals("gp", StringComparison.OrdinalIgnoreCase) ? "Patch"
+                        : "Game";
+                    string meta = gid + gver + (role == "Game" ? "" : " • " + role);
                     _all.Add(new GameItem
                     {
                         Path = g.Path,
                         Title = string.IsNullOrWhiteSpace(g.Info.Title) ? Path.GetFileName(g.Path) : g.Info.Title,
-                        Meta = gid + gver,
+                        Meta = meta,
                         SizeText = Program.FormatSize(g.Info.PackageSize),
                         SizeBytes = g.Info.PackageSize,
                         Platform = g.Info.Format == "pkg"
@@ -456,10 +484,13 @@ public partial class LibraryView : UserControl
                         IsPs5 = (g.Info.Platform ?? "").StartsWith("PS5"),
                         IsPs4 = (g.Info.Platform ?? "").StartsWith("PS4"),
                         IsDlc = g.Info.IsDlc,
+                        FamilyKey = FamilyKeyOf(g.Info, g.Path),
+                        Role = role,
                         CardRadius = new CornerRadius(2),
                         ImageRadius = new CornerRadius((g.Info.Platform ?? "").StartsWith("PS5") ? 16 : 2),
                     });
                 }
+                LinkFamilies();
                 ApplyFilter();
                 _m.Status = _all.Count == 0
                     ? (_roots.Count == 0 ? "Add a folder or drives first." : "No PKG files found.")
@@ -503,6 +534,53 @@ public partial class LibraryView : UserControl
         }
     }
 
+    /// <summary>
+    /// Family key: exact TitleId (region codes stay separate families).
+    /// Updates share the base TitleId; DLC content ids contain it too.
+    /// No TitleId → lone file family (never merged by title text).
+    /// </summary>
+    private static string FamilyKeyOf(LoopDPI.Core.PkgInfo info, string path)
+    {
+        string tid = (info.TitleId ?? "").Trim().ToUpperInvariant();
+        if (tid.Length >= 4)
+            return tid;
+        return "FILE:" + Path.GetFileName(path).ToUpperInvariant();
+    }
+
+    private static int RoleRank(string role) => role switch
+    {
+        "Game" => 0,
+        "Patch" => 1,
+        _ => 2, // DLC
+    };
+
+    /// <summary>
+    /// Second pass over the library: family sizes + tooltip text, so
+    /// updates/DLCs are visibly attached to their base game.
+    /// </summary>
+    private void LinkFamilies()
+    {
+        var groups = _all.GroupBy(g => g.FamilyKey).ToList();
+        foreach (var grp in groups)
+        {
+            var members = grp.OrderBy(g => RoleRank(g.Role))
+                .ThenByDescending(g => g.SizeBytes)
+                .ThenBy(g => g.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            bool linked = !grp.Key.StartsWith("FILE:", StringComparison.Ordinal) && members.Count > 1;
+            string tip = linked
+                ? "Linked (click 🔗 to show only this family):\n" + string.Join("\n", members.Select(m =>
+                    $"• {m.Title} ({m.Role}, {m.SizeText})"))
+                : "";
+            foreach (var m in members)
+            {
+                m.FamilyCount = linked ? members.Count : 0;
+                m.HasFamily = linked;
+                m.FamilyTip = tip;
+            }
+        }
+    }
+
     private void ApplyFilter()
     {
         string q = (_m.Search ?? "").Trim().ToLowerInvariant();
@@ -518,15 +596,28 @@ public partial class LibraryView : UserControl
                 Path.GetFileName(g.Path).ToLowerInvariant().Contains(q))
                 list.Add(g);
         }
-        IEnumerable<GameItem> ordered = _m.SortMode switch
+        IEnumerable<GameItem> MemberOrder(IEnumerable<GameItem> ms) => ms
+            .OrderBy(g => RoleRank(g.Role))
+            .ThenByDescending(g => g.SizeBytes)
+            .ThenBy(g => g.Title, StringComparer.OrdinalIgnoreCase);
+        // Families stay contiguous in every mode; the family is positioned
+        // by its base item (first Game-rank member, else biggest member).
+        GameItem Rep(IGrouping<string, GameItem> grp)
         {
-            "Size ↓" => list.OrderByDescending(g => g.SizeBytes).ThenBy(g => g.Title, StringComparer.OrdinalIgnoreCase),
-            "Size ↑" => list.OrderBy(g => g.SizeBytes).ThenBy(g => g.Title, StringComparer.OrdinalIgnoreCase),
-            _ => list.OrderBy(g => g.Title, StringComparer.OrdinalIgnoreCase),
+            var ordered = MemberOrder(grp).ToList();
+            return ordered.FirstOrDefault(g => g.Role == "Game") ?? ordered[0];
+        }
+        var families = list.GroupBy(g => g.FamilyKey).ToList();
+        IEnumerable<IGrouping<string, GameItem>> orderedFams = _m.SortMode switch
+        {
+            "Size ↓" => families.OrderByDescending(f => Rep(f).SizeBytes).ThenBy(f => Rep(f).Title, StringComparer.OrdinalIgnoreCase),
+            "Size ↑" => families.OrderBy(f => Rep(f).SizeBytes).ThenBy(f => Rep(f).Title, StringComparer.OrdinalIgnoreCase),
+            _ => families.OrderBy(f => Rep(f).Title, StringComparer.OrdinalIgnoreCase),
         };
         _m.Games.Clear();
-        foreach (var g in ordered)
-            _m.Games.Add(g);
+        foreach (var fam in orderedFams)
+            foreach (var g in MemberOrder(fam))
+                _m.Games.Add(g);
         UpdateGamesLabel();
     }
 
@@ -534,13 +625,14 @@ public partial class LibraryView : UserControl
     {
         int ps5 = _all.Count(g => g.Platform.StartsWith("PS5"));
         int ps4 = _all.Count(g => g.Platform.StartsWith("PS4"));
+        int fams = _all.Select(g => g.FamilyKey).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         var sel = this.FindControl<ListBox>("GamesList").SelectedItems;
         int selCount = sel?.Count ?? 0;
         string scope = (_m.PlatformFilter ?? "All") switch
         {
             "PS5" => $"{_m.Games.Count} PS5 games",
             "PS4" => $"{_m.Games.Count} PS4 games",
-            _ => $"{_all.Count} games ({ps5} PS5 • {ps4} PS4)",
+            _ => $"{_all.Count} games in {fams} families ({ps5} PS5 • {ps4} PS4)",
         };
         _m.GamesLabel = selCount > 0 ? $"{scope} • {selCount} selected" : scope;
     }
@@ -695,6 +787,15 @@ public partial class LibraryView : UserControl
                     if (_stop)
                         break;
                     await PushOneAsync(qi);
+                    // Sequential gate (ticked = PS4 console): next game waits
+                    // until this one is downloaded AND installed.
+                    if (_m.SequentialMode && !_stop)
+                    {
+                        bool pushed;
+                        lock (_runLock) { pushed = _activeIds.ContainsKey(qi); }
+                        if (pushed)
+                            await WaitForInstallAsync(qi);
+                    }
                 }
                 MonitorTick();
                 await Task.Delay(1000);
@@ -800,6 +901,158 @@ public partial class LibraryView : UserControl
         {
             item.Message = "queued on console…";
             UpdateQueueLabel();
+        });
+    }
+
+    /// <summary>
+    /// One-by-one gate: wait until the console fully pulled the file, then
+    /// until /api/status reports idle (= install finished). Old receivers
+    /// without /api/status fall back to download-done. Honest timeouts so
+    /// a dead console never hangs the queue forever.
+    /// Stop-exits always fail the row (resumable) — never orphan it, so
+    /// Clear done can always remove it.
+    /// </summary>
+    private void FailStopped(QueueItem item, string msg)
+    {
+        Post(() =>
+        {
+            var row = item;
+            if (row.State == "sending" || row.State == "queued")
+            {
+                row.State = "failed";
+                row.Message = msg;
+                row.CanResume = true;
+                UpdateQueueLabel();
+            }
+        });
+        lock (_runLock)
+        {
+            _activeIds.Remove(item);
+            _activeIdle.Remove(item);
+            _activeSince.Remove(item);
+        }
+    }
+
+    private async Task WaitForInstallAsync(QueueItem item)
+    {
+        string id;
+        lock (_runLock)
+        {
+            if (!_activeIds.TryGetValue(item, out id!))
+                return;
+        }
+        long size = item.Game.SizeBytes;
+        DateTime pushedAt = DateTime.UtcNow;
+        for (;;)
+        {
+            if (_stop)
+            {
+                FailStopped(item, "stopped");
+                return;
+            }
+            long delta = _server!.ServedFor(id);
+            var row = item;
+            Post(() =>
+            {
+                if (row.State == "sending")
+                {
+                    row.Percent = size <= 0 ? 100 : Math.Min(100, delta * 100.0 / size);
+                    row.Message = delta == 0
+                        ? "queued on console…"
+                        : $"{Program.FormatSize(delta)} / {Program.FormatSize(size)}";
+                }
+            });
+            if (delta >= size)
+                break;
+            if (delta == 0 && (DateTime.UtcNow - pushedAt).TotalMinutes >= 30)
+            {
+                Post(() =>
+                {
+                    row.State = "failed";
+                    row.Message = "console never pulled it";
+                    row.CanResume = true;
+                    UpdateQueueLabel();
+                });
+                lock (_runLock)
+                {
+                    _activeIds.Remove(item);
+                    _activeIdle.Remove(item);
+                    _activeSince.Remove(item);
+                }
+                return;
+            }
+            await Task.Delay(1000);
+        }
+        // Downloaded — now wait for the install itself to finish.
+        DateTime t0 = DateTime.UtcNow;
+        bool wasBusy = false;
+        bool confirmed = false;
+        bool supported = true;
+        for (;;)
+        {
+            if (_stop)
+            {
+                FailStopped(item, "stopped");
+                return;
+            }
+            bool busy;
+            (supported, busy) = await ConsoleClient.GetStatusAsync(_m.PsIp);
+            if (!supported)
+                break; // old receiver / DPI: download-done is all we can know
+            if (busy)
+                wasBusy = true;
+            else if (wasBusy)
+            {
+                confirmed = true;
+                break; // was installing, now idle = finished
+            }
+            else if ((DateTime.UtcNow - t0).TotalMinutes >= 5)
+                break; // never reported busy — don't hang the queue
+            if ((DateTime.UtcNow - t0).TotalHours >= 3)
+                break;
+            Post(() =>
+            {
+                if (item.State == "sending" || item.State == "sent")
+                    item.Message = "installing on console…";
+            });
+            await Task.Delay(3000);
+        }
+        if (!supported && !_stop)
+        {
+            // No status endpoint (e.g. PS4 DPI): give the console a moment
+            // to start the install before the next push lands.
+            Post(() =>
+            {
+                if (item.State == "sending" || item.State == "sent")
+                    item.Message = "sent — install starting on console…";
+            });
+            for (int i = 0; i < 10 && !_stop; i++)
+                await Task.Delay(1000);
+        }
+        Post(() =>
+        {
+            var row = item;
+            if (row.State == "failed")
+                return;
+            if (_stop && !confirmed)
+            {
+                row.State = "failed";
+                row.Message = "stopped";
+                row.CanResume = true;
+            }
+            else
+            {
+                row.State = "sent";
+                row.Percent = 100;
+                row.Message = confirmed ? "installed ✓ (check console)" : "sent to console queue";
+            }
+                lock (_runLock)
+                {
+                    _activeIds.Remove(row);
+                    _activeIdle.Remove(row);
+                    _activeSince.Remove(row);
+                }
+                UpdateQueueLabel();
         });
     }
 

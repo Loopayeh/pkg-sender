@@ -18,7 +18,9 @@
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="4. Open PKG Sender — it finds the console by itself and asks to switch if its address changed."/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
-          Text="5. Add a folder with .pkg files, select games, press Install PKG."/>
+          Text="5. Press Scan drives… (or + Add folder), select games, press Send PKG."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="6. Updates and DLCs stay glued to their base game (same title id, e.g. PPSA12345 — different region codes stay separate). Click the 🔗 chip on a card to show only that family."/>
         <TextBlock Text="Troubleshooting" FontSize="16" FontWeight="Bold" Margin="0,8,0,0"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="• “No receiver” — the elf is not running on the console. Send it again."/>

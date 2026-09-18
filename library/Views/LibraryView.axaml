@@ -30,12 +30,21 @@
           </StackPanel>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-          <TextBlock Text="PS" VerticalAlignment="Center" Foreground="#8B93A5" FontSize="11"/>
-          <TextBox Text="{Binding PsIp, Mode=TwoWay}" Width="130" Watermark="console IP"/>
-          <TextBlock Text="PC" VerticalAlignment="Center" Foreground="#8B93A5" FontSize="11"/>
-          <ComboBox Name="PcIpBox" Width="150" ToolTip.Tip="Auto-detected LAN address — pick the NIC on the console's network"/>
-          <Button Content="Test" Name="BtnTest" MinWidth="70"/>
-          <Button Content="↻" Name="BtnRedetect" MinWidth="40" ToolTip.Tip="Look for the console again"/>
+          <Border Background="#2A2A2A" CornerRadius="6" Padding="10,6">
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <TextBlock Text="PS" VerticalAlignment="Center" Foreground="#8B93A5" FontSize="11" FontWeight="Bold"/>
+              <TextBox Text="{Binding PsIp, Mode=TwoWay}" Width="120" Watermark="console IP"/>
+              <Button Content="Test" Name="BtnTest" MinWidth="64" Padding="12,9"/>
+              <Button Content="↻" Name="BtnRedetect" MinWidth="40" ToolTip.Tip="Look for the console again"/>
+            </StackPanel>
+          </Border>
+          <Border Background="#2A2A2A" CornerRadius="6" Padding="10,6">
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <TextBlock Text="PC" VerticalAlignment="Center" Foreground="#8B93A5" FontSize="11" FontWeight="Bold"/>
+              <ComboBox Name="PcIpBox" Width="140" ToolTip.Tip="Auto-detected LAN address — pick the NIC on the console's network"/>
+            </StackPanel>
+          </Border>
+          <Border Background="#2A2A2A" Width="1" Margin="4,6"/>
           <TextBlock Name="TestResultText" Text="{Binding TestResult}" VerticalAlignment="Center" FontSize="11" Foreground="#8B93A5" MaxWidth="200" TextTrimming="CharacterEllipsis"/>
         </StackPanel>
       </Grid>
@@ -44,17 +53,23 @@
     <!-- toolbar -->
     <Border Grid.Row="1" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="16,10">
       <Grid RowDefinitions="Auto" RowSpacing="8">
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto,Auto">
-          <Button Grid.Column="0" Content="+ Add folder" Name="BtnAddFolder" Margin="0,0,8,0"/>
-          <Button Grid.Column="1" Content="Scan" Name="BtnScan" Margin="0,0,8,0"/>
-          <Border Grid.Column="2" Background="#2A2A2A" Width="1" Margin="4,4,12,4"/>
-          <Button Grid.Column="3" Content="+ Add drives" Name="BtnAddDrive" Margin="0,0,8,0"/>
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto">
+          <Button Grid.Column="0" Content="Scan drives…" Name="BtnAddDrive" MinWidth="120" Margin="0,0,8,0" ToolTip.Tip="Pick drive(s) to search for PKG files"/>
+          <Button Grid.Column="1" Content="+ Add folder" Name="BtnAddFolder" Classes="ghost" Margin="0,0,8,0"/>
+          <Button Grid.Column="2" Content="Scan" Name="BtnScan" Classes="ghost" Margin="0,0,8,0"/>
+          <Border Grid.Column="3" Background="#2A2A2A" Width="1" Margin="4,4,12,4"/>
           <ComboBox Grid.Column="4" Name="PlatformBox" Width="110" Margin="0,0,8,0"/>
           <ComboBox Grid.Column="5" Name="SortBox" Width="130" Margin="0,0,8,0" ToolTip.Tip="Sort library"/>
-          <TextBox Grid.Column="6" Text="{Binding Search, Mode=TwoWay}" Watermark="🔍 Search title, ID…" Margin="0,0,8,0"/>
-          <Button Grid.Column="7" Content="Install PKG" Name="BtnSend" MinWidth="150" FontWeight="Bold" Margin="0,0,8,0" ToolTip.Tip="Install selected .pkg files via the console downloader"/>
-          <Button Grid.Column="8" Content="■" Name="BtnStop" MinWidth="40" Margin="0,0,8,0" ToolTip.Tip="Stop the running queue (keeps the rows)"/>
-          <Button Grid.Column="9" Content="Clear done" Name="BtnClearDone" ToolTip.Tip="Remove finished rows only — never touches active downloads"/>
+          <Grid Grid.Column="6" Margin="0,0,8,0">
+            <TextBox Text="{Binding Search, Mode=TwoWay}" Watermark="🔍 Search title, ID…" Padding="10,8,36,8"/>
+            <Button Content="✕" Name="BtnClearSearch" HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Background="Transparent" BorderThickness="0" Padding="10,4" MinWidth="0"
+                    FontSize="11" Foreground="#8B93A5" ToolTip.Tip="Back to full library"/>
+          </Grid>
+          <Border Grid.Column="7" Background="#2A2A2A" Width="1" Margin="8,4,16,4"/>
+          <Button Grid.Column="8" Content="Send PKG" Name="BtnSend" MinWidth="150" FontWeight="Bold" Margin="0,0,8,0" ToolTip.Tip="Send selected .pkg files to the console downloader"/>
+          <Button Grid.Column="9" Content="■" Name="BtnStop" MinWidth="40" Margin="0,0,8,0" ToolTip.Tip="Stop the running queue (keeps the rows)"/>
+          <Button Grid.Column="10" Content="Clear done" Name="BtnClearDone" ToolTip.Tip="Remove finished rows only — never touches active downloads"/>
         </Grid>
       </Grid>
     </Border>
@@ -97,6 +112,10 @@
                           <Border Background="#E8A34C" CornerRadius="4" Padding="8,2" IsVisible="{Binding IsDlc}">
                             <TextBlock Text="DLC" FontSize="11" FontWeight="Bold" Foreground="#171717"/>
                           </Border>
+                          <Button Name="LinkBtn" Content="{Binding FamilyCount, StringFormat='🔗×{0}'}"
+                                  IsVisible="{Binding HasFamily}" ToolTip.Tip="{Binding FamilyTip}"
+                                  Padding="8,2" FontSize="11" FontWeight="Bold"
+                                  Background="#2A2A2A" Foreground="#4F8EF7" CornerRadius="4"/>
                         </StackPanel>
                         <TextBlock Grid.Column="1" Text="{Binding SizeText}" FontSize="11" Foreground="#8B93A5" VerticalAlignment="Center"/>
                       </Grid>
@@ -111,7 +130,12 @@
 
       <Border Grid.Column="1" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="12" Margin="12,0,0,0">
         <Grid RowDefinitions="Auto,*,Auto">
-          <TextBlock Grid.Row="0" Text="Send queue" FontWeight="Bold" FontSize="13" Foreground="#F1F3F8" Margin="0,0,0,8"/>
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+            <TextBlock Text="Send queue" FontWeight="Bold" FontSize="13" Foreground="#F1F3F8" VerticalAlignment="Center"/>
+            <CheckBox Grid.Column="1" Content="PS4 console" IsChecked="{Binding SequentialMode, Mode=TwoWay}"
+                      FontSize="11" Foreground="#8B93A5" VerticalAlignment="Center"
+                      ToolTip.Tip="Tick when the target is a PS4: games install strictly one-by-one (PS5 queues natively)"/>
+          </Grid>
           <ListBox Grid.Row="1" Name="QueueList" ItemsSource="{Binding Queue}" Background="Transparent" BorderThickness="0">
             <ListBox.ItemTemplate>
               <DataTemplate>
