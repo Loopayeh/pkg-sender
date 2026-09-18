@@ -28,6 +28,14 @@ Works with a jailbroken PS4 running **DirectPackageInstaller** (RPI on port 1280
 - Self-updating: silent check at startup, footer button lights up on new release (off switch in About for offline PCs)
 - Guide window with setup + troubleshooting, first-run About
 
+## Support
+
+If you enjoy what I build and want to support my work, you can donate — every bit means a lot. 💙
+
+- USDT (BEP-20): `0x839a30D52Ef7D2b53e818b9931efd7FE6F472e50`
+  ([send via TrustWallet](https://link.trustwallet.com/send?coin=20000714&address=0x839a30D52Ef7D2b53e818b9931efd7FE6F472e50&token_id=0x55d398326f99059fF775485246999027B3197955))
+- More: [loopayeh.github.io](https://loopayeh.github.io/)
+
 ## Troubleshooting
 
 - **● No receiver (red)** — the elf isn't running on the console. Send it again.
