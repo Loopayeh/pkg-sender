@@ -100,9 +100,10 @@ public partial class LibraryView : UserControl
         _liveTimer.Tick += async (_, _) => await LiveProbeAsync();
         _liveTimer.Start();
         _ = LiveProbeAsync();
-        if (!s.AboutShown)
+        if (!s.AboutShown || PkgSender.Program.ForceAbout)
         {
-            // First launch: show About (support links), then start detection.
+            // First launch (or installer --first-install): show About
+            // (support links), then start detection.
             Dispatcher.UIThread.Post(async () =>
             {
                 var owner = Top as Window;

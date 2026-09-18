@@ -10,9 +10,17 @@ namespace PkgSender;
 
 internal static class Program
 {
+    // Set by the installer launch ("PkgSender.exe --first-install"):
+    // forces the About (support links) dialog on this run, even if a
+    // previous install already set AboutShown in settings.json.
+    internal static bool ForceAbout;
+
     [STAThread]
     public static int Main(string[] args)
     {
+        foreach (var a in args)
+            if (a.Equals("--first-install", StringComparison.OrdinalIgnoreCase))
+                ForceAbout = true;
         for (int i = 0; i < args.Length - 1; i++)
         {
             if (args[i].Equals("--selftest", StringComparison.OrdinalIgnoreCase))

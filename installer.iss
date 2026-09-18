@@ -32,6 +32,7 @@ Name: "desktopicon"; Description: "Create a &desktop icon"; Flags: checkedonce
 ; missing rules are the most common cause of "push ok but nothing happens".
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""PKG Sender"" dir=in action=allow protocol=TCP localport=9898 program=""{app}\PkgSender.exe"""; Flags: runhidden; StatusMsg: "Adding firewall rule…"
 Filename: "netsh.exe"; Parameters: "advfirewall firewall add rule name=""PKG Sender beacon"" dir=in action=allow protocol=UDP localport=12801 program=""{app}\PkgSender.exe"""; Flags: runhidden
+Filename: "{app}\PkgSender.exe"; Parameters: "--first-install"; Description: "Launch PKG Sender"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""PKG Sender"""; Flags: runhidden
