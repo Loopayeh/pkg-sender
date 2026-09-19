@@ -723,7 +723,7 @@ public partial class LibraryView : UserControl
     /// <summary>
     /// Scan an explicit root set. merge=false replaces the list (Scan
     /// button); merge=true upserts by path (drives/folders added later).
-    /// All formats are shown: pkg, images (exfat/ffpfsc/ffpkg), folders.
+    /// PKG files only — images/folders stay out of the list.
     /// </summary>
     private async Task ScanAsync(List<string> roots, bool merge)
     {
@@ -748,6 +748,9 @@ public partial class LibraryView : UserControl
                 }
                 foreach (var g in found)
                 {
+                    // PKG-only: images/folders are scanned for cache but hidden.
+                    if (g.Info.Format != "pkg" || g.Info.IsFolder)
+                        continue;
                     string gid = !string.IsNullOrWhiteSpace(g.Info.TitleId)
                         ? g.Info.TitleId : g.Info.ContentId;
                     string gver = string.IsNullOrWhiteSpace(g.Info.Version)
@@ -785,7 +788,7 @@ public partial class LibraryView : UserControl
                 WriteIconDiag();
                 ApplyFilter();
                 _m.Status = _all.Count == 0
-                    ? (_roots.Count == 0 ? "Add a folder or drives first." : "No games found.")
+                    ? (_roots.Count == 0 ? "Add a folder or drives first." : "No PKG files found.")
                     : $"{_all.Count} games in library.";
             });
         }
