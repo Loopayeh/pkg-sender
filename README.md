@@ -17,14 +17,55 @@ On first launch the About window opens (support links live there).
 
 ## LAN connection
 
-**Via router (easiest):** plug the PC and the console into the same router (cable or Wi-Fi). Both get automatic addresses — the app finds the console by itself (receiver beacon first, LAN sweep as fallback).
+PKG Sender connects to your PS5/PS4 in two ways.
 
-**Direct cable, no router:** set static addresses on the same subnet, e.g. PC `192.168.10.1` and console `192.168.10.2`, mask `255.255.255.0`.
+### Method 1 — Through a router
 
-- On the console: Network settings → set up the connection with a manual IP address.
-- In the app: pick the PC address from the PC box, type the console IP, press **Test**.
+The easiest option — connect both your PC and console to the same router.
 
-Automatic `169.254.x.x` addresses are ignored by design — always set static addresses for a direct cable.
+```
+PC ─────┐
+        ├── Router
+PS5/PS4 ┘
+```
+
+You don't need to configure IP addresses manually.
+
+1. Connect your PC to the router using Ethernet or Wi-Fi.
+2. Connect your PS5/PS4 to the same router.
+3. Start the PKG Receiver on your console.
+4. Open PKG Sender — it discovers the console on your local network automatically.
+
+### Method 2 — Direct Ethernet connection
+
+PC straight to PS5/PS4 with an Ethernet cable, no router.
+
+```
+PC ───────── Ethernet ───────── PS5/PS4
+192.168.10.1                  192.168.10.2
+```
+
+Because there is no router providing DHCP, you must manually assign an IP address to both devices.
+
+**1. Set the PC IP address.** On Windows: Settings → Network & Internet → Ethernet → IP assignment → Edit. Select Manual, enable IPv4, and enter:
+
+- IP address: `192.168.10.1`
+- Subnet mask: `255.255.255.0`
+- Gateway: leave empty
+- DNS: leave empty
+
+**2. Set the PS5/PS4 IP address.** Configure the console's Ethernet connection with:
+
+- IP address: `192.168.10.2`
+- Subnet mask: `255.255.255.0`
+- Gateway: leave empty
+- DNS: leave empty
+
+The important part is that both devices are on the same subnet (`255.255.255.0`).
+
+**3. Start the PKG Receiver** on the console, then launch PKG Sender on your PC. In the app pick the PC address from the PC box, type the console IP, press **Test**.
+
+> ⚠ Do NOT leave a direct cable on automatic IP assignment. Windows or the console may fall back to a `169.254.x.x` address when no DHCP server is available — PKG Sender ignores these automatic link-local addresses on purpose. If the cable is plugged in but nothing is found, this is almost always the cause.
 
 ## PS4
 

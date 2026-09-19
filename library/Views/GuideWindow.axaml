@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="PkgSender.Views.GuideWindow"
-        Title="PKG Sender guide" Width="460" Height="480"
+         Title="PKG Sender guide" Width="480" Height="560"
         CanResize="False" ShowInTaskbar="False"
         Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
         WindowStartupLocation="CenterOwner">
@@ -23,13 +23,27 @@
           Text="6. Updates and DLCs stay glued to their base game (same title id, e.g. PPSA12345 — different region codes stay separate). Click the 🔗 chip on a card to show only that family."/>
         <TextBlock Text="LAN connection" FontSize="16" FontWeight="Bold" Margin="0,8,0,0"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
-          Text="• Easiest: plug the PC and the console into the same router (cable or Wi-Fi). Both get automatic addresses — the app finds the console by itself."/>
+          Text="PKG Sender connects to your PS5/PS4 in two ways."/>
+        <TextBlock Text="Method 1 — Through a router" FontSize="13" FontWeight="Bold" Margin="0,4,0,0"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
-          Text="• Direct cable, no router: set static addresses on the same subnet, e.g. PC 192.168.10.1 and console 192.168.10.2, mask 255.255.255.0."/>
+          Text="The easiest option — connect both your PC and console to the same router."/>
+        <TextBlock FontSize="12" Foreground="#8B93A5" FontFamily="Consolas"
+          Text="PC ─────┐&#x0a;        ├── Router&#x0a;PS5/PS4 ┘"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
-          Text="On the console: Network settings → set up the connection with a manual IP address. In the app: pick the PC address from the PC box, type the console IP, press Test."/>
+          Text="No manual IP setup needed: join the PC (Ethernet or Wi-Fi) and the console to the same router, start the PKG Receiver on the console, open PKG Sender — it discovers the console automatically."/>
+        <TextBlock Text="Method 2 — Direct cable" FontSize="13" FontWeight="Bold" Margin="0,4,0,0"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
-          Text="Automatic 169.254.x.x addresses are ignored by design — always set static addresses for a direct cable."/>
+          Text="PC straight to console with an Ethernet cable, no router. With no DHCP around, set static addresses on both ends."/>
+        <TextBlock FontSize="12" Foreground="#8B93A5" FontFamily="Consolas"
+          Text="PC ───── Ethernet ───── PS5/PS4&#x0a;192.168.10.1          192.168.10.2"/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="1) PC — Windows Settings → Network &amp; Internet → Ethernet → IP assignment → Edit. Manual + IPv4: 192.168.10.1 / mask 255.255.255.0, gateway and DNS empty."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="2) Console — Network settings → manual IP: 192.168.10.2 / mask 255.255.255.0, gateway and DNS empty."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+          Text="3) Start the PKG Receiver on the console, then PKG Sender on the PC — in the app pick the PC address, type the console IP, press Test."/>
+        <TextBlock TextWrapping="Wrap" FontSize="12" FontWeight="Bold" Foreground="#E8A34C"
+          Text="⚠ Do NOT leave a direct cable on automatic IP: Windows or the console may fall back to 169.254.x.x, which PKG Sender ignores on purpose. If the cable is in but nothing is found, this is almost always the cause — set the static addresses above."/>
         <TextBlock Text="Troubleshooting" FontSize="16" FontWeight="Bold" Margin="0,8,0,0"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="• “No receiver” — the elf is not running on the console. Send it again."/>
