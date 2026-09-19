@@ -80,6 +80,12 @@ Works with a jailbroken PS4 running a compatible package receiver (listening on 
 - Self-updating: silent check at startup, footer button lights up on new release (off switch in About for offline PCs)
 - Guide window with setup + troubleshooting, first-run About
 
+## Screenshots
+
+![PKG Sender main view](docs/screenshot-main.png)
+
+![PKG Sender compact view](docs/screenshot-compact.png)
+
 ## Support
 
 If you enjoy what I build and want to support my work, you can donate — every bit means a lot. 💙
