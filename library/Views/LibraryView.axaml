@@ -6,7 +6,7 @@
              xmlns:views="clr-namespace:PkgSender.Views"
              mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="700"
              x:Class="PkgSender.Views.LibraryView"
-             Foreground="#F1F3F8" Background="#000000" FontFamily="Segoe UI">
+             Foreground="#F1F3F8" Background="#171717" FontFamily="Segoe UI">
   <UserControl.Resources>
     <views:Ps5CardBackgroundConverter x:Key="Ps5CardBg"/>
     <views:Ps5ImageBackgroundConverter x:Key="Ps5ImgBg"/>
@@ -18,7 +18,7 @@
   </Design.DataContext>
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
     <!-- compact bar (only visible in compact mode) -->
-    <Border Grid.Row="0" Name="CompactBar" IsVisible="False" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="12,8">
+    <Border Grid.Row="0" Name="CompactBar" IsVisible="False" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="12,8">
       <Grid ColumnDefinitions="Auto,Auto,*,Auto">
         <TextBlock Grid.Column="0" Text="{Binding TestResult}" VerticalAlignment="Center" FontSize="12" Foreground="#F1F3F8" Margin="0,0,12,0"/>
         <TextBlock Grid.Column="1" Text="{Binding SpeedText}" VerticalAlignment="Center" FontSize="12" Foreground="#6FCF7B" FontWeight="Bold" Margin="0,0,12,0"/>
@@ -28,7 +28,7 @@
     </Border>
 
     <!-- header -->
-    <Border Grid.Row="1" Name="HeaderBar" Background="#000000" Padding="16,12">
+    <Border Grid.Row="1" Name="HeaderBar" Background="#202020" Padding="16,12">
       <Grid ColumnDefinitions="*,Auto">
         <StackPanel Orientation="Horizontal" Spacing="12">
           <Border Background="#4F8EF7" CornerRadius="9" Width="38" Height="38" ClipToBounds="True">
@@ -61,7 +61,7 @@
     </Border>
 
     <!-- toolbar -->
-    <Border Grid.Row="2" Name="ToolbarBar" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="16,10">
+    <Border Grid.Row="2" Name="ToolbarBar" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="16,10">
       <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
         <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
           <Button Grid.Column="0" Content="Scan drives…" Name="BtnAddDrive" MinWidth="120" Margin="0,0,8,0" ToolTip.Tip="Pick drive(s) to search for PKG files"/>
@@ -90,7 +90,7 @@
 
     <!-- body -->
     <Grid Grid.Row="3" Name="BodyGrid" ColumnDefinitions="*,300" Margin="16,12">
-      <Border Name="GamesPanel" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="10">
+      <Border Name="GamesPanel" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="10">
         <Grid RowDefinitions="Auto,Auto,*">
           <Border Grid.Row="0" Name="FilterBanner" IsVisible="{Binding IsFiltering}"
                   Background="#1E3A5F" BorderBrush="#4F8EF7" BorderThickness="1" CornerRadius="6" Padding="10,7" Margin="0,0,0,8">
@@ -155,7 +155,7 @@
         </Grid>
       </Border>
 
-      <Border Name="QueuePanel" Grid.Column="1" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="12" Margin="12,0,0,0">
+      <Border Name="QueuePanel" Grid.Column="1" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="12" Margin="12,0,0,0">
         <Grid RowDefinitions="Auto,*,Auto">
           <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
             <TextBlock Text="Send queue" FontWeight="Bold" FontSize="13" Foreground="#F1F3F8" VerticalAlignment="Center"/>
@@ -207,7 +207,7 @@
     </Grid>
 
     <!-- status -->
-    <Border Grid.Row="4" Name="StatusBar" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="0,1,0,0" Padding="16,8">
+    <Border Grid.Row="4" Name="StatusBar" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="0,1,0,0" Padding="16,8">
       <Grid ColumnDefinitions="4,*,Auto,Auto,Auto,Auto">
         <Border Background="#4F8EF7" CornerRadius="2" Margin="0,4"/>
         <TextBlock Grid.Column="1" Text="{Binding Status}" Margin="10,0,0,0" FontSize="11" Foreground="#F1F3F8" VerticalAlignment="Center"/>
