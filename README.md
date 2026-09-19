@@ -8,7 +8,7 @@ Get `PkgSender-Setup-X.Y.Z.exe` from [Releases](../../releases) — self-contain
 
 ## Setup
 
-1. Jailbreak your PS5 and send `pkg-receiver.elf` (ships inside the install folder). Wait for the console toast *listening on port 12800*. (Receiver tested on PS5 firmware 6.02 — it uses the same install ABI as websrv/ftpsrv, so other jailbreakable firmwares should work, unverified.)
+1. Jailbreak your PS5 and send `pkg-receiver.elf` (ships inside the install folder). Wait for the console toast *listening on port 12800*. (Receiver tested on PS5 firmware 6.02.)
 2. Put the console on the same network as this PC (Wi-Fi or LAN). The console itself needs no internet.
 3. Open PKG Sender — it finds the console by itself (receiver beacon first, LAN sweep as fallback). If the console got a new DHCP address, it asks: *switch to it?*
 4. Press **Scan drives…** (or **+ Add folder**), select games, press **Send PKG**.
@@ -17,7 +17,7 @@ On first launch the About window opens (support links live there).
 
 ## PS4
 
-Works with a jailbroken PS4 running **DirectPackageInstaller** (RPI on port 12800): Test should go green and Send PKG works. Tick **PS4 console** above the queue — PS4 installs go strictly one-by-one (PS5 queues natively).
+Works with a jailbroken PS4 running a compatible package receiver (listening on port 12800): Test should go green and Send PKG works. Tick **PS4 console** above the queue — PS4 installs go strictly one-by-one (PS5 queues natively).
 
 ## Features
 
