@@ -66,7 +66,7 @@
         <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
           <Button Grid.Column="0" Content="Scan drives…" Name="BtnAddDrive" MinWidth="120" Margin="0,0,8,0" ToolTip.Tip="Pick drive(s) to search for PKG files"/>
           <Button Grid.Column="1" Content="+ Add folder" Name="BtnAddFolder" Classes="ghost" Margin="0,0,8,0"/>
-          <Button Grid.Column="2" Content="Scan" Name="BtnScan" Classes="ghost" Margin="0,0,8,0"/>
+          <Button Grid.Column="2" Content="Scan" Name="BtnScan" Classes="ghost" Margin="0,0,8,0" ToolTip.Tip="Scan added folders only (drives: Scan drives…)"/>
           <Border Grid.Column="3" Background="#2A2A2A" Width="1" Margin="4,4,12,4"/>
           <ComboBox Grid.Column="4" Name="PlatformBox" Width="110" Margin="0,0,8,0"/>
           <ComboBox Grid.Column="5" Name="SortBox" Width="130" Margin="0,0,8,0" ToolTip.Tip="Sort library"/>

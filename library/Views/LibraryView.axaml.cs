@@ -140,7 +140,7 @@ public partial class LibraryView : UserControl
         }
         this.FindControl<Button>("BtnAddDrive").Click += async (_, _) => await AddDriveAsync();
         this.FindControl<Button>("BtnTest").Click += async (_, _) => await TestConnectionAsync();
-        this.FindControl<Button>("BtnScan").Click += async (_, _) => await ScanAsync();
+        this.FindControl<Button>("BtnScan").Click += async (_, _) => await ScanFoldersAsync();
         this.FindControl<Button>("BtnSend").Click += (_, _) => EnqueuePkgs();
         this.FindControl<Button>("BtnAbout").Click += async (_, _) =>
         {
@@ -662,7 +662,8 @@ public partial class LibraryView : UserControl
         }
         _roots = next;
         LibraryScanner.SaveRoots(_roots);
-        await ScanAsync();
+        // Drives only — folder results already on screen stay untouched.
+        await ScanAsync(picked, merge: true);
     }
 
     private static bool IsDriveRoot(string path)
@@ -685,41 +686,68 @@ public partial class LibraryView : UserControl
             Title = title,
             AllowMultiple = true,
         });
-        bool added = false;
+        var added = new List<string>();
         foreach (var f in folders)
         {
             string p = f.Path.LocalPath;
             if (Directory.Exists(p) && !_roots.Contains(p, StringComparer.OrdinalIgnoreCase))
             {
                 _roots.Add(p);
-                added = true;
+                added.Add(p);
             }
         }
-        if (added)
+        if (added.Count > 0)
         {
             LibraryScanner.SaveRoots(_roots);
-            await ScanAsync();
+            // New folders only — drive results already on screen stay untouched.
+            await ScanAsync(added, merge: true);
         }
     }
 
-    private async Task ScanAsync()
+    /// <summary>
+    /// The Scan button: added folders only, never drives. Replaces the list.
+    /// </summary>
+    private async Task ScanFoldersAsync()
+    {
+        var folders = _roots.Where(r => !IsDriveRoot(r)).ToList();
+        if (folders.Count == 0)
+        {
+            _m.Status = _roots.Count == 0
+                ? "Add a folder or drives first."
+                : "No folders added — Scan covers + Add folder paths only (drives: Scan drives…).";
+            return;
+        }
+        await ScanAsync(folders, merge: false);
+    }
+
+    /// <summary>
+    /// Scan an explicit root set. merge=false replaces the list (Scan
+    /// button); merge=true upserts by path (drives/folders added later).
+    /// All formats are shown: pkg, images (exfat/ffpfsc/ffpkg), folders.
+    /// </summary>
+    private async Task ScanAsync(List<string> roots, bool merge)
     {
         if (_m.IsBusy)
             return;
         _m.IsBusy = true;
-        _m.Status = _roots.Count == 0 ? "Add a folder or drives first." : "Scanning…";
+        _m.Status = roots.Count == 0 ? "Add a folder or drives first." : "Scanning…";
         try
         {
             var prog = new Progress<string>(s => Post(() => _m.Status = s));
-            var found = await LibraryScanner.ScanAsync(_roots, prog);
+            var found = await LibraryScanner.ScanAsync(roots, prog);
             Post(() =>
             {
-                _all.Clear();
+                if (!merge)
+                    _all.Clear();
+                else if (found.Count > 0)
+                {
+                    var paths = new HashSet<string>(found.Select(g => g.Path), StringComparer.OrdinalIgnoreCase);
+                    for (int i = _all.Count - 1; i >= 0; i--)
+                        if (paths.Contains(_all[i].Path))
+                            _all.RemoveAt(i);
+                }
                 foreach (var g in found)
                 {
-                    // PKG-only mode: skip images/folders (kept in cache for later).
-                    if (g.Info.Format != "pkg" || g.Info.IsFolder)
-                        continue;
                     string gid = !string.IsNullOrWhiteSpace(g.Info.TitleId)
                         ? g.Info.TitleId : g.Info.ContentId;
                     string gver = string.IsNullOrWhiteSpace(g.Info.Version)
@@ -757,7 +785,7 @@ public partial class LibraryView : UserControl
                 WriteIconDiag();
                 ApplyFilter();
                 _m.Status = _all.Count == 0
-                    ? (_roots.Count == 0 ? "Add a folder or drives first." : "No PKG files found.")
+                    ? (_roots.Count == 0 ? "Add a folder or drives first." : "No games found.")
                     : $"{_all.Count} games in library.";
             });
         }
