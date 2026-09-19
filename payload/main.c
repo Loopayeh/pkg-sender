@@ -14,7 +14,10 @@
  *   POST /api/files/write?path=..&offset= - raw chunk append
  *   POST /api/files/done   {"path":..,"size":N} - verify + toast
  *   UDP beacon: "PKGSENDER v1" broadcast to 255.255.255.255:12801 every 3s
- *     (UNTESTED on console — rebuild elf and verify with a listener first)
+ *
+ * TEST_ONLY build (make TEST_ONLY=1): beacon + /api + /api/status work,
+ * every install/file path is refused. Discovery testing only — nobody
+ * can install anything with it.
  *
  * PKG install is sceAppInstUtilInstallByPackage, which accepts both
  * local paths (/data/xxx.pkg, mapped to /user/data/xxx.pkg) and remote
@@ -166,12 +169,14 @@ installer_init(void)
  * never wedge the single-threaded HTTP loop. */
 static const char *install_err_text(int rc, char *buf, size_t sz);
 static int installer_install(const char *path, const char *want_name,
+                             const char *want_icon,
                              char *name_out, size_t name_sz);
 static void url_decode(const char *src, char *dst, size_t dst_sz);
 
 typedef struct install_job {
 	char url[URL_MAX];
 	char name[256];
+	char icon[512];
 } install_job_t;
 
 /* active install count for GET /api/status (multi-PKG queue pacing) */
@@ -188,7 +193,8 @@ install_worker(void *arg)
 
 	__sync_fetch_and_add(&g_active_installs, 1);
 	rc = installer_install(job->url,
-	    job->name[0] ? job->name : NULL, name, sizeof(name));
+	    job->name[0] ? job->name : NULL,
+	    job->icon[0] ? job->icon : NULL, name, sizeof(name));
 
 	if (rc == 0)
 		snprintf(toast, sizeof(toast), "Loopayeh: installing %s", name);
@@ -202,10 +208,21 @@ install_worker(void *arg)
 }
 
 static int
-queue_install(const char *url, const char *name)
+queue_install(const char *url, const char *name, const char *icon)
 {
+#ifdef TEST_ONLY
+	(void)url;
+	(void)name;
+	(void)icon;
+	(void)install_worker; /* keep referenced so -Wunused-function stays quiet */
+	/* defense in depth: the early refusal above should already have
+	 * caught every install route. */
+	return -1;
+#else
 	pthread_t tid;
-	install_job_t *job = malloc(sizeof(*job));
+	install_job_t *job;
+
+	job = malloc(sizeof(*job));
 
 	if (!job)
 		return -1;
@@ -214,17 +231,23 @@ queue_install(const char *url, const char *name)
 		snprintf(job->name, sizeof(job->name), "%s", name);
 	else
 		job->name[0] = '\0';
+	if (icon)
+		snprintf(job->icon, sizeof(job->icon), "%s", icon);
+	else
+		job->icon[0] = '\0';
 	if (pthread_create(&tid, NULL, install_worker, job) != 0) {
 		free(job);
 		return -1;
 	}
 	pthread_detach(tid);
 	return 0;
+#endif
 }
 
 /* returns 0 on success, SCE error code otherwise */
 static int
 installer_install(const char *path, const char *want_name,
+                  const char *want_icon,
                   char *name_out, size_t name_sz)
 {
 	char local[URL_MAX + 32];
@@ -276,7 +299,9 @@ installer_install(const char *path, const char *want_name,
 	meta.playgo_scenario_id = "";
 	meta.content_id = "";
 	meta.content_name = name_out;
-	meta.icon_url = "";
+	/* Sender passes the cover URL it serves (/icon/..): the console
+	 * fetches it itself for the download list. Empty = no cover. */
+	meta.icon_url = (want_icon && *want_icon) ? want_icon : "";
 	meta.slot = 0;
 	meta.is_playgo_enabled = 0;
 
@@ -579,6 +604,14 @@ content_length(const char *hdr)
 }
 
 static const char UI_HTML[] =
+#ifdef TEST_ONLY
+"<!DOCTYPE html><html><head><meta charset=utf-8>"
+"<title>PKG Sender (test build)</title></head>"
+"<body style='background:#101418;color:#eee;font-family:sans-serif;"
+"display:flex;align-items:center;justify-content:center;min-height:100vh'>"
+"<h2>PKG Sender receiver — TEST BUILD, installs disabled</h2>"
+"</body></html>";
+#else
 "<!DOCTYPE html><html><head><meta charset=utf-8>"
 "<meta name=viewport content='width=device-width,initial-scale=1'>"
 "<title>PKG Sender</title>"
@@ -599,6 +632,7 @@ static const char UI_HTML[] =
 "var x=await r.text();document.getElementById('st').textContent=x;}"
 "catch(ex){document.getElementById('st').textContent='Error: '+ex;}}</script>"
 "</body></html>";
+#endif
 
 /* human text for install errors (-1/-2 are ours, rest are SCE codes) */
 static const char *
@@ -614,7 +648,8 @@ install_err_text(int rc, char *buf, size_t sz)
 }
 
 static void
-do_install_reply_text(int fd, const char *url, const char *name)
+do_install_reply_text(int fd, const char *url, const char *name,
+                      const char *icon)
 {
 	char disp[256], out[URL_MAX + 64];
 
@@ -625,7 +660,7 @@ do_install_reply_text(int fd, const char *url, const char *name)
 		base = base ? base + 1 : url;
 		snprintf(disp, sizeof(disp), "%s", base);
 	}
-	if (queue_install(url, name) == 0)
+	if (queue_install(url, name, icon) == 0)
 		snprintf(out, sizeof(out), "ok: install queued for %s", disp);
 	else
 		snprintf(out, sizeof(out), "error:queue failed");
@@ -665,6 +700,17 @@ handle_client(int fd)
 		close(fd);
 		return;
 	}
+
+#ifdef TEST_ONLY
+	/* test build: probes + beacon stay alive, everything that can
+	 * install or write files is refused up front. */
+	if (!strcmp(method, "POST") ||
+	    !strncmp(path, "/install", 8) ||
+	    !strncmp(path, "/api/files/", 11)) {
+		send_text(fd, "Loopayeh: test build, installs disabled");
+		goto handled;
+	}
+#endif
 
 	body_len = content_length(buf);
 	if (body_len < 0 || body_len > BODY_MAX) {
@@ -712,11 +758,15 @@ handle_client(int fd)
 	} else if (!strcmp(method, "GET") &&
 	           (!strncmp(path, "/install", 8))) {
 		char gname[256];
+		char gicon[512];
 
 		if (query_url(path, url, sizeof(url))) {
 			gname[0] = '\0';
+			gicon[0] = '\0';
 			query_param(path, "name", gname, sizeof(gname));
-			do_install_reply_text(fd, url, gname[0] ? gname : NULL);
+			query_param(path, "icon", gicon, sizeof(gicon));
+			do_install_reply_text(fd, url, gname[0] ? gname : NULL,
+			                      gicon[0] ? gicon : NULL);
 		} else {
 			send_text(fd, "error:missing url");
 		}
@@ -750,11 +800,15 @@ handle_client(int fd)
 	} else if (!strcmp(method, "POST") &&
 	           !strncmp(path, "/api/install", 12)) {
 		char gname[256];
+		char gicon[512];
 
 		if (json_first_package(body, url, sizeof(url))) {
 			gname[0] = '\0';
+			gicon[0] = '\0';
 			json_string(body, "name", gname, sizeof(gname));
-			if (queue_install(url, gname[0] ? gname : NULL) == 0)
+			json_string(body, "icon_url", gicon, sizeof(gicon));
+			if (queue_install(url, gname[0] ? gname : NULL,
+			                  gicon[0] ? gicon : NULL) == 0)
 				send_json(fd, "{\"status\":\"success\"}");
 			else
 				send_json(fd,
@@ -770,7 +824,7 @@ handle_client(int fd)
 		if (grab_http_url(body, url, sizeof(url))) {
 			char out[URL_MAX + 32];
 
-			if (queue_install(url, NULL) == 0)
+			if (queue_install(url, NULL, NULL) == 0)
 				snprintf(out, sizeof(out),
 				    "SUCCESS: %s", url);
 			else
@@ -939,7 +993,13 @@ main(void)
 		return 1;
 	}
 
-	notify_user("Loopayeh: listening on port 12800");
+	notify_user(
+#ifdef TEST_ONLY
+	    "Loopayeh: TEST BUILD listening (no installs)"
+#else
+	    "Loopayeh: listening on port 12800"
+#endif
+	    );
 
 	beacon_start();
 

@@ -354,8 +354,10 @@ public static class PkgReader
     }
 
     /// <summary>
-    /// Cover search: exact icon id, then icon variant ids, then any
-    /// *icon*.png entry (smallest first). Every candidate is PNG-verified.
+    /// Cover search: exact icon id, then icon variant ids. No fuzzy
+    /// *icon*.png fallback: patch/DLC packages often bundle a generic or
+    /// unrelated icon, which used to land on the wrong card in family view.
+    /// No exact icon -> no cover (UI shows a placeholder tile instead).
     /// </summary>
     private static byte[]? FindIcon(CntImage cnt)
     {
@@ -383,16 +385,6 @@ public static class PkgReader
                 if (hit != null)
                     return hit;
             }
-        }
-        foreach (var e in cnt.Entries
-                     .Where(e => (e.Flags & 0x80000000) == 0 &&
-                                 e.Name.IndexOf("icon", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                                 e.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-                     .OrderBy(e => e.DataSize))
-        {
-            var hit = Try(e);
-            if (hit != null)
-                return hit;
         }
         return null;
     }

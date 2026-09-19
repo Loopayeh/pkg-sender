@@ -6,7 +6,7 @@
              xmlns:views="clr-namespace:PkgSender.Views"
              mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="700"
              x:Class="PkgSender.Views.LibraryView"
-             Foreground="#F1F3F8" Background="#171717" FontFamily="Segoe UI">
+             Foreground="#F1F3F8" Background="#000000" FontFamily="Segoe UI">
   <UserControl.Resources>
     <views:Ps5CardBackgroundConverter x:Key="Ps5CardBg"/>
     <views:Ps5ImageBackgroundConverter x:Key="Ps5ImgBg"/>
@@ -16,9 +16,19 @@
   <Design.DataContext>
     <vm:LibraryViewModel/>
   </Design.DataContext>
-  <Grid RowDefinitions="Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+    <!-- compact bar (only visible in compact mode) -->
+    <Border Grid.Row="0" Name="CompactBar" IsVisible="False" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="12,8">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+        <TextBlock Grid.Column="0" Text="{Binding TestResult}" VerticalAlignment="Center" FontSize="12" Foreground="#F1F3F8" Margin="0,0,12,0"/>
+        <TextBlock Grid.Column="1" Text="{Binding SpeedText}" VerticalAlignment="Center" FontSize="12" Foreground="#6FCF7B" FontWeight="Bold" Margin="0,0,12,0"/>
+        <TextBlock Grid.Column="2" Text="{Binding EtaText}" VerticalAlignment="Center" FontSize="12" Foreground="#4F8EF7" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+        <Button Grid.Column="3" Content="Expand" Name="BtnExpand" Classes="ghost" Padding="12,4" FontSize="11" FontWeight="Normal"/>
+      </Grid>
+    </Border>
+
     <!-- header -->
-    <Border Grid.Row="0" Background="#202020" Padding="16,12">
+    <Border Grid.Row="1" Name="HeaderBar" Background="#000000" Padding="16,12">
       <Grid ColumnDefinitions="*,Auto">
         <StackPanel Orientation="Horizontal" Spacing="12">
           <Border Background="#4F8EF7" CornerRadius="9" Width="38" Height="38" ClipToBounds="True">
@@ -35,7 +45,7 @@
               <TextBlock Text="PS" VerticalAlignment="Center" Foreground="#8B93A5" FontSize="11" FontWeight="Bold"/>
               <TextBox Text="{Binding PsIp, Mode=TwoWay}" Width="120" Watermark="console IP"/>
               <Button Content="Test" Name="BtnTest" MinWidth="64" Padding="12,9"/>
-              <Button Content="↻" Name="BtnRedetect" MinWidth="40" ToolTip.Tip="Look for the console again"/>
+              <Button Content="↻ Detect" Name="BtnRedetect" MinWidth="40" ToolTip.Tip="Look for the console again"/>
             </StackPanel>
           </Border>
           <Border Background="#2A2A2A" CornerRadius="6" Padding="10,6">
@@ -51,35 +61,46 @@
     </Border>
 
     <!-- toolbar -->
-    <Border Grid.Row="1" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="16,10">
-      <Grid RowDefinitions="Auto" RowSpacing="8">
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto">
+    <Border Grid.Row="2" Name="ToolbarBar" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="16,10">
+      <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
           <Button Grid.Column="0" Content="Scan drives…" Name="BtnAddDrive" MinWidth="120" Margin="0,0,8,0" ToolTip.Tip="Pick drive(s) to search for PKG files"/>
           <Button Grid.Column="1" Content="+ Add folder" Name="BtnAddFolder" Classes="ghost" Margin="0,0,8,0"/>
           <Button Grid.Column="2" Content="Scan" Name="BtnScan" Classes="ghost" Margin="0,0,8,0"/>
           <Border Grid.Column="3" Background="#2A2A2A" Width="1" Margin="4,4,12,4"/>
           <ComboBox Grid.Column="4" Name="PlatformBox" Width="110" Margin="0,0,8,0"/>
           <ComboBox Grid.Column="5" Name="SortBox" Width="130" Margin="0,0,8,0" ToolTip.Tip="Sort library"/>
-          <Grid Grid.Column="6" Margin="0,0,8,0">
+          <CheckBox Grid.Column="6" Content="Hide DLC/updates" IsChecked="{Binding HideExtras, Mode=TwoWay}"
+                    VerticalAlignment="Center" Foreground="#8B93A5" FontSize="12"
+                    ToolTip.Tip="Show only base games — click 🔗×N on a card to see its updates/DLCs"/>
+        </Grid>
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto,Auto">
+          <Grid Grid.Column="0" Margin="0,0,8,0">
             <TextBox Text="{Binding Search, Mode=TwoWay}" Watermark="🔍 Search title, ID…" Padding="10,8,36,8"/>
             <Button Content="✕" Name="BtnClearSearch" HorizontalAlignment="Right" VerticalAlignment="Center"
                     Background="Transparent" BorderThickness="0" Padding="10,4" MinWidth="0"
                     FontSize="11" Foreground="#8B93A5" ToolTip.Tip="Back to full library"/>
           </Grid>
-          <Border Grid.Column="7" Background="#2A2A2A" Width="1" Margin="8,4,16,4"/>
-          <Button Grid.Column="8" Content="Send PKG" Name="BtnSend" MinWidth="150" FontWeight="Bold" Margin="0,0,8,0" ToolTip.Tip="Send selected .pkg files to the console downloader"/>
-          <Button Grid.Column="9" Content="■" Name="BtnStop" MinWidth="40" Margin="0,0,8,0" ToolTip.Tip="Stop the running queue (keeps the rows)"/>
-          <Button Grid.Column="10" Content="Clear done" Name="BtnClearDone" ToolTip.Tip="Remove finished rows only — never touches active downloads"/>
+          <Button Grid.Column="1" Content="Send PKG" Name="BtnSend" MinWidth="150" FontWeight="Bold" Margin="0,0,8,0" IsEnabled="False" ToolTip.Tip="Send selected .pkg files to the console downloader"/>
+          <Button Grid.Column="2" Content="■ Stop" Name="BtnStop" Margin="0,0,8,0" ToolTip.Tip="Stop the running queue (keeps the rows)"/>
+          <Button Grid.Column="3" Content="Clear done" Name="BtnClearDone" ToolTip.Tip="Remove finished rows only — never touches active downloads"/>
         </Grid>
       </Grid>
     </Border>
 
     <!-- body -->
-    <Grid Grid.Row="2" ColumnDefinitions="*,300" Margin="16,12">
-      <Border Background="#202020" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="10">
-        <Grid RowDefinitions="Auto,*">
-          <TextBlock Grid.Row="0" Text="{Binding GamesLabel}" Foreground="#8B93A5" FontSize="12" Margin="4,0,0,8"/>
-          <ListBox Grid.Row="1" Name="GamesList" ItemsSource="{Binding Games}" Background="Transparent" BorderThickness="0"
+    <Grid Grid.Row="3" Name="BodyGrid" ColumnDefinitions="*,300" Margin="16,12">
+      <Border Name="GamesPanel" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="10">
+        <Grid RowDefinitions="Auto,Auto,*">
+          <Border Grid.Row="0" Name="FilterBanner" IsVisible="{Binding IsFiltering}"
+                  Background="#1E3A5F" BorderBrush="#4F8EF7" BorderThickness="1" CornerRadius="6" Padding="10,7" Margin="0,0,0,8">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Grid.Column="0" Text="{Binding FilterLabel}" Foreground="#BFD6FF" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+              <Button Grid.Column="1" Name="BtnClearFilter" Content="Show all ✕" Classes="ghost" Padding="12,4" FontSize="11" FontWeight="Normal" Margin="8,0,0,0" ToolTip.Tip="Clear the search — back to full library"/>
+            </Grid>
+          </Border>
+          <TextBlock Grid.Row="1" Text="{Binding GamesLabel}" Foreground="#8B93A5" FontSize="12" Margin="4,0,0,8"/>
+          <ListBox Grid.Row="2" Name="GamesList" ItemsSource="{Binding Games}" Background="Transparent" BorderThickness="0"
                    SelectionMode="Multiple" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemsPanel>
               <ItemsPanelTemplate>
@@ -88,17 +109,23 @@
             </ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
               <DataTemplate>
-                <Border Width="196" CornerRadius="2" Margin="4"
+                <Border Width="170" CornerRadius="2" Margin="4"
                         Background="{Binding IsPs5, Converter={StaticResource Ps5CardBg}}"
                         BorderBrush="{Binding IsSelected, Converter={StaticResource SelBorder}}"
                         BorderThickness="2"
                         Padding="10">
                   <Grid>
                     <StackPanel Spacing="6">
-                      <Border CornerRadius="{Binding ImageRadius}" ClipToBounds="True" Height="176"
-                              Background="{Binding IsPs5, Converter={StaticResource Ps5ImgBg}}">
-                        <Image Source="{Binding Cover}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                      </Border>
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                        <Border CornerRadius="{Binding ImageRadius}" ClipToBounds="True" Width="100" Height="100"
+                                Background="{Binding IsPs5, Converter={StaticResource Ps5ImgBg}}">
+                          <Grid>
+                            <Image Source="{Binding Cover}" IsVisible="{Binding HasCover}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBlock Text="📦" IsVisible="{Binding NoCover}" FontSize="44" Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          </Grid>
+                        </Border>
+                        <Image Source="/Assets/logo.png" Width="34" Height="34" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </StackPanel>
                       <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="13" Foreground="#F1F3F8" TextTrimming="CharacterEllipsis" MaxLines="1"/>
                       <TextBlock Text="{Binding Meta}" FontSize="11" Foreground="#8B93A5" TextTrimming="CharacterEllipsis" MaxLines="1"/>
                       <Grid ColumnDefinitions="*,Auto">
@@ -128,11 +155,14 @@
         </Grid>
       </Border>
 
-      <Border Grid.Column="1" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="12" Margin="12,0,0,0">
+      <Border Name="QueuePanel" Grid.Column="1" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="12" Margin="12,0,0,0">
         <Grid RowDefinitions="Auto,*,Auto">
-          <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
             <TextBlock Text="Send queue" FontWeight="Bold" FontSize="13" Foreground="#F1F3F8" VerticalAlignment="Center"/>
-            <CheckBox Grid.Column="1" Content="PS4 console" IsChecked="{Binding SequentialMode, Mode=TwoWay}"
+            <CheckBox Grid.Column="1" Name="CompactBox" Content="Compact" Margin="8,0,8,0"
+                      FontSize="11" Foreground="#8B93A5" VerticalAlignment="Center"
+                      ToolTip.Tip="Hide the games library — show only the send queue"/>
+            <CheckBox Grid.Column="2" Content="PS4 console" IsChecked="{Binding SequentialMode, Mode=TwoWay}"
                       FontSize="11" Foreground="#8B93A5" VerticalAlignment="Center"
                       ToolTip.Tip="Tick when the target is a PS4: games install strictly one-by-one (PS5 queues natively)"/>
           </Grid>
@@ -140,15 +170,30 @@
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <Border Background="#2A2A2A" CornerRadius="8" Padding="10" Margin="0,0,0,8">
-                  <StackPanel Spacing="4">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <Border Grid.Column="0" Width="46" Height="46" CornerRadius="6" ClipToBounds="True"
+                            Background="#171717" Margin="0,0,10,0" VerticalAlignment="Top">
+                      <Grid>
+                        <Image Source="{Binding Game.Cover}" IsVisible="{Binding Game.HasCover}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock Text="📦" IsVisible="{Binding Game.NoCover}" FontSize="20" Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      </Grid>
+                    </Border>
+                    <StackPanel Grid.Column="1" Spacing="4">
                     <TextBlock Text="{Binding Game.Title}" FontWeight="Bold" FontSize="12" Foreground="#F1F3F8" TextTrimming="CharacterEllipsis" MaxLines="1"/>
                     <Grid ColumnDefinitions="*,Auto">
                       <TextBlock Text="{Binding State}" FontSize="11" Foreground="#4F8EF7" VerticalAlignment="Center"/>
                       <TextBlock Grid.Column="1" Text="{Binding Message}" FontSize="11" Foreground="#8B93A5" VerticalAlignment="Center"/>
                     </Grid>
                     <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" Height="6" CornerRadius="3" Foreground="#4F8EF7" Background="#171717"/>
-                    <Button Content="Resume" IsVisible="{Binding CanResume}" HorizontalAlignment="Right" Padding="12,4" FontSize="11"/>
-                  </StackPanel>
+                    <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
+                      <Button Grid.Column="1" Name="BtnPause" Content="{Binding PauseText}" IsVisible="{Binding CanPause}" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Pause this item / start it again"/>
+                      <Button Grid.Column="2" Name="BtnUp" Content="▲" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Move up (queued items only)"/>
+                      <Button Grid.Column="3" Name="BtnDown" Content="▼" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Move down (queued items only)"/>
+                      <Button Grid.Column="4" Name="BtnRemove" Content="✕" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Remove from queue (active download is cancelled, resumable)"/>
+                      <Button Grid.Column="5" Content="Resume" IsVisible="{Binding CanResume}" HorizontalAlignment="Right" Padding="12,4" FontSize="11"/>
+                    </Grid>
+                    </StackPanel>
+                  </Grid>
                 </Border>
               </DataTemplate>
             </ListBox.ItemTemplate>
@@ -162,13 +207,14 @@
     </Grid>
 
     <!-- status -->
-    <Border Grid.Row="3" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="0,1,0,0" Padding="16,8">
-      <Grid ColumnDefinitions="4,*,Auto,Auto,Auto">
+    <Border Grid.Row="4" Name="StatusBar" Background="#000000" BorderBrush="#2A2A2A" BorderThickness="0,1,0,0" Padding="16,8">
+      <Grid ColumnDefinitions="4,*,Auto,Auto,Auto,Auto">
         <Border Background="#4F8EF7" CornerRadius="2" Margin="0,4"/>
         <TextBlock Grid.Column="1" Text="{Binding Status}" Margin="10,0,0,0" FontSize="11" Foreground="#F1F3F8" VerticalAlignment="Center"/>
-        <Button Grid.Column="2" Content="Guide" Name="BtnGuide" Classes="ghost" Margin="8,0,0,0" Padding="12,4" FontSize="11" FontWeight="Normal" ToolTip.Tip="Setup manual"/>
-        <Button Grid.Column="3" Content="Check updates" Name="BtnUpdate" Classes="ghost" Margin="8,0,0,0" Padding="12,4" FontSize="11" FontWeight="Normal"/>
-        <Button Grid.Column="4" Content="♥ About" Name="BtnAbout" Margin="8,0,0,0" Padding="12,4" FontSize="11" FontWeight="Bold" ToolTip.Tip="About PKG Sender — support links"/>
+        <TextBlock Grid.Column="2" Text="{Binding SpeedText}" Margin="12,0,0,0" FontSize="11" FontWeight="Bold" Foreground="#6FCF7B" VerticalAlignment="Center"/>
+        <Button Grid.Column="3" Content="Guide" Name="BtnGuide" Classes="ghost" Margin="8,0,0,0" Padding="12,4" FontSize="11" FontWeight="Normal" ToolTip.Tip="Setup manual"/>
+        <Button Grid.Column="4" Content="Check updates" Name="BtnUpdate" Classes="ghost" Margin="8,0,0,0" Padding="12,4" FontSize="11" FontWeight="Normal"/>
+        <Button Grid.Column="5" Content="♥ About" Name="BtnAbout" Margin="8,0,0,0" Padding="12,4" FontSize="11" FontWeight="Bold" ToolTip.Tip="About PKG Sender — support links"/>
       </Grid>
     </Border>
   </Grid>
@@ -209,6 +255,10 @@
     <Style Selector="Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="#2A2A2A"/>
       <Setter Property="TextBlock.Foreground" Value="#8B93A5"/>
+    </Style>
+    <Style Selector="ListBox#GamesList > ListBoxItem">
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="Margin" Value="0"/>
     </Style>
     <Style Selector="ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="Transparent"/>

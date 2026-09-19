@@ -8,6 +8,11 @@ ELF := pkg-receiver.elf
 
 CFLAGS := -Os -Wall -Werror
 
+ifdef TEST_ONLY
+    CFLAGS += -DTEST_ONLY
+    ELF := pkg-receiver-testonly.elf
+endif
+
 all: $(ELF)
 
 $(ELF): main.c

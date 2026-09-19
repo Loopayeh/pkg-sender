@@ -17,6 +17,8 @@ public sealed class GameItem : ReactiveObject
     public bool IsFolder { get; init; }
     public string ContentId { get; init; } = "";
     public Bitmap? Cover { get; init; }
+    public bool HasCover { get; init; }
+    public bool NoCover => !HasCover;
     public byte[]? IconData { get; init; }
     public bool IsPs5 { get; init; }
     public bool IsPs4 { get; init; }
@@ -40,7 +42,11 @@ public sealed class QueueItem : ReactiveObject
     public GameItem Game { get; init; } = null!;
 
     private string _state = "queued";
-    public string State { get => _state; set => this.RaiseAndSetIfChanged(ref _state, value); }
+    public string State
+    {
+        get => _state;
+        set { this.RaiseAndSetIfChanged(ref _state, value); this.RaisePropertyChanged(nameof(CanPause)); }
+    }
 
     private double _percent;
     public double Percent { get => _percent; set => this.RaiseAndSetIfChanged(ref _percent, value); }
@@ -50,6 +56,19 @@ public sealed class QueueItem : ReactiveObject
 
     private bool _canResume;
     public bool CanResume { get => _canResume; set => this.RaiseAndSetIfChanged(ref _canResume, value); }
+
+    private bool _isPaused;
+    public bool IsPaused
+    {
+        get => _isPaused;
+        set { this.RaiseAndSetIfChanged(ref _isPaused, value); this.RaisePropertyChanged(nameof(PauseText)); }
+    }
+
+    /// <summary>Pause button glyph: ⏸ while running, ▶ while paused.</summary>
+    public string PauseText => IsPaused ? "▶" : "⏸";
+
+    /// <summary>Pause only makes sense before the row is done.</summary>
+    public bool CanPause => State is "queued" or "sending";
 }
 
 public sealed class LibraryViewModel : ReactiveObject
@@ -66,11 +85,20 @@ public sealed class LibraryViewModel : ReactiveObject
     private string _search = "";
     public string Search { get => _search; set => this.RaiseAndSetIfChanged(ref _search, value); }
 
+    private bool _isFiltering;
+    public bool IsFiltering { get => _isFiltering; set => this.RaiseAndSetIfChanged(ref _isFiltering, value); }
+
+    private string _filterLabel = "";
+    public string FilterLabel { get => _filterLabel; set => this.RaiseAndSetIfChanged(ref _filterLabel, value); }
+
     private string _platformFilter = "All";
     public string PlatformFilter { get => _platformFilter; set => this.RaiseAndSetIfChanged(ref _platformFilter, value); }
 
     private string _sortMode = "Name";
     public string SortMode { get => _sortMode; set => this.RaiseAndSetIfChanged(ref _sortMode, value); }
+
+    private bool _hideExtras;
+    public bool HideExtras { get => _hideExtras; set => this.RaiseAndSetIfChanged(ref _hideExtras, value); }
 
     private bool _sequentialMode;
     public bool SequentialMode { get => _sequentialMode; set => this.RaiseAndSetIfChanged(ref _sequentialMode, value); }
@@ -95,6 +123,12 @@ public sealed class LibraryViewModel : ReactiveObject
 
     private string _queueLabel = "Queue is empty";
     public string QueueLabel { get => _queueLabel; set => this.RaiseAndSetIfChanged(ref _queueLabel, value); }
+
+    private string _etaText = "";
+    public string EtaText { get => _etaText; set => this.RaiseAndSetIfChanged(ref _etaText, value); }
+
+    private string _speedText = "";
+    public string SpeedText { get => _speedText; set => this.RaiseAndSetIfChanged(ref _speedText, value); }
 
     public ObservableCollection<GameItem> Games { get; } = new();
     public ObservableCollection<QueueItem> Queue { get; } = new();

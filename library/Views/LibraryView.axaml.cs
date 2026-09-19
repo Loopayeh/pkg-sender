@@ -25,10 +25,18 @@ public partial class LibraryView : UserControl
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _registry = new();
     private RangeFileServer? _server;
     private long _nextId;
-    // Stable url-id per local file: re-pushing the same file reuses its URL,
-    // so the console RESUMES instead of starting over.
+    // Session-unique url ids: the console caches icons by URL, and plain
+    // counters restart at 0 every launch — so last week's /icon/3 (game A)
+    // would be served from the console cache for this week's /icon/3
+    // (game B). Prefixing every id with a per-launch tag makes each push
+    // a fresh URL the console has never seen. Within one session the id
+    // per path stays stable (needed for Resume).
+    private readonly string _sessionTag = Guid.NewGuid().ToString("N")[..8];
+    // Stable url-id per local file within one session (session-tagged, see
+    // _sessionTag): re-pushing the same file reuses its URL, so the console
+    // RESUMES instead of starting over.
     private readonly Dictionary<string, string> _pathIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Queue<QueueItem> _runQueue = new();
+    private readonly List<QueueItem> _runQueue = new();
     private readonly object _runLock = new();
     private bool _running;
     private volatile bool _stop;
@@ -66,11 +74,21 @@ public partial class LibraryView : UserControl
         };
         _m.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(LibraryViewModel.Search))
+            if (e.PropertyName == nameof(LibraryViewModel.Search) ||
+                e.PropertyName == nameof(LibraryViewModel.HideExtras))
                 ApplyFilter();
         };
         this.FindControl<Button>("BtnAddFolder").Click += async (_, _) => await AddFolderAsync("Add a folder to scan for games");
         this.FindControl<Button>("BtnClearSearch").Click += (_, _) => _m.Search = "";
+        this.FindControl<Button>("BtnClearFilter").Click += (_, _) => _m.Search = "";
+        this.FindControl<CheckBox>("CompactBox").Checked += (_, _) => SetCompact(true);
+        this.FindControl<CheckBox>("CompactBox").Unchecked += (_, _) => SetCompact(false);
+        this.FindControl<Button>("BtnExpand").Click += (_, _) =>
+        {
+            var cb = this.FindControl<CheckBox>("CompactBox");
+            if (cb != null) cb.IsChecked = false;
+            SetCompact(false); // direct, in case the uncheck event misfires
+        };
         // Auto-detect LAN addresses: PC IP is picked, never typed.
         _nets = LoopDPI.Core.NetDiscovery.GetLanNetworks();
         RefreshPcIps(selectForPs: _m.PsIp);
@@ -168,7 +186,14 @@ public partial class LibraryView : UserControl
                 box.SelectedItems?.Cast<GameItem>() ?? Enumerable.Empty<GameItem>());
             foreach (var g in _all)
                 g.IsSelected = selected.Contains(g);
+            this.FindControl<Button>("BtnSend").IsEnabled = (box.SelectedItems?.Count ?? 0) > 0;
             UpdateGamesLabel();
+        };
+        // Double-click a card: queue that game straight away (same rules as Send PKG).
+        this.FindControl<ListBox>("GamesList").DoubleTapped += (_, e) =>
+        {
+            if ((e.Source as Control)?.DataContext is GameItem g)
+                EnqueueGames(new[] { g });
         };
         // 🔗 chip inside cards: filter the library to that family.
         this.FindControl<ListBox>("GamesList").AddHandler(Button.ClickEvent, OnCardLinkClick);
@@ -183,6 +208,76 @@ public partial class LibraryView : UserControl
         if (string.IsNullOrWhiteSpace(item)) return "";
         int sp = item.IndexOf(' ');
         return (sp < 0 ? item : item[..sp]).Trim();
+    }
+
+    /// <summary>
+    /// Compact view (like pkg-viewer): the whole app shrinks to a small
+    /// window showing only connection status + ETA + the send queue.
+    /// Header, toolbar, status bar and the games library are hidden.
+    /// </summary>
+    private double _savedW = 1200, _savedH = 700;
+    private WindowState _savedState = WindowState.Normal;
+    private bool _compact;
+
+    private void SetCompact(bool on)
+    {
+        // Guard: ignore redundant calls (e.g. double events) so the saved
+        // size is never overwritten by the compact size itself.
+        if (_compact == on)
+            return;
+        _compact = on;
+        var compact = this.FindControl<Border>("CompactBar");
+        var header = this.FindControl<Border>("HeaderBar");
+        var toolbar = this.FindControl<Border>("ToolbarBar");
+        var status = this.FindControl<Border>("StatusBar");
+        var games = this.FindControl<Border>("GamesPanel");
+        var queue = this.FindControl<Border>("QueuePanel");
+        if (compact == null || games == null || queue == null)
+            return;
+        compact.IsVisible = on;
+        if (header != null) header.IsVisible = !on;
+        if (toolbar != null) toolbar.IsVisible = !on;
+        if (status != null) status.IsVisible = !on;
+        games.IsVisible = !on;
+        Grid.SetColumn(queue, on ? 0 : 1);
+        Grid.SetColumnSpan(queue, on ? 2 : 1);
+        queue.Margin = on ? new Thickness(0) : new Thickness(12, 0, 0, 0);
+        if (TopLevel.GetTopLevel(this) is Window w)
+        {
+            if (on)
+            {
+                _savedW = w.Width;
+                _savedH = w.Height;
+                _savedState = w.WindowState;
+                w.WindowState = WindowState.Normal;
+                w.MinWidth = 360;
+                w.MinHeight = 240;
+                w.Width = 470;
+                w.Height = 520;
+            }
+            else
+            {
+                w.MinWidth = 1140;
+                w.MinHeight = 560;
+                double tw = Math.Max(_savedW, 1140);
+                double th = Math.Max(_savedH, 560);
+                var ws = _savedState;
+                // Restore after the expand layout settles: resizing in the
+                // same tick as the visibility changes sometimes gets
+                // swallowed, leaving the window stuck small.
+                Dispatcher.UIThread.Post(() =>
+                {
+                    w.MinWidth = 1140;
+                    w.MinHeight = 560;
+                    w.WindowState = ws;
+                    if (ws == WindowState.Normal)
+                    {
+                        w.Width = tw;
+                        w.Height = th;
+                    }
+                });
+            }
+        }
     }
 
     private void RefreshPcIps(string? selectForPs)
@@ -340,8 +435,160 @@ public partial class LibraryView : UserControl
     }
 
     private void OnQueueButtonClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)    {
-        if (e.Source is Button { DataContext: QueueItem qi })
-            ResumeRow(qi);
+        if (e.Source is Button { DataContext: QueueItem qi } btn)
+        {
+                switch (btn.Name)
+                {
+                    case "BtnUp": MoveRow(qi, -1); break;
+                    case "BtnDown": MoveRow(qi, +1); break;
+                    case "BtnRemove": RemoveRow(qi); break;
+                    case "BtnPause": TogglePause(qi); break;
+                    default: ResumeRow(qi); break;
+                }
+        }
+    }
+
+    /// <summary>
+    /// Reorder a still-queued (not yet pushed) row. Active/sent rows are
+    /// locked: the console already owns their order. Called on UI thread.
+    /// </summary>
+    private void MoveRow(QueueItem row, int dir)
+    {
+        lock (_runLock)
+        {
+            if (!_runQueue.Contains(row))
+            {
+                Post(() => _m.Status = "Only queued items can be reordered (this one is already on the console).");
+                return;
+            }
+            int i = _m.Queue.IndexOf(row);
+            int j = i + dir;
+            while (j >= 0 && j < _m.Queue.Count && !_runQueue.Contains(_m.Queue[j]))
+                j += dir;
+            if (j < 0 || j >= _m.Queue.Count)
+                return;
+            _m.Queue.Move(i, j);
+            // Mirror the order into the pending list.
+            _runQueue.Remove(row);
+            int pos = 0;
+            foreach (var q in _m.Queue)
+            {
+                if (q == row)
+                    break;
+                if (_runQueue.Contains(q))
+                    pos++;
+            }
+            _runQueue.Insert(Math.Min(pos, _runQueue.Count), row);
+        }
+        UpdateQueueLabel();
+    }
+
+    /// <summary>
+    /// Remove one row: queued -> just drops out; active download -> its URL
+    /// is revoked (console errors out) and the row stays as resumable;
+    /// sent/failed -> row removed.
+    /// </summary>
+    private void RemoveRow(QueueItem row)
+    {
+        string? revokeId = null;
+        bool wasPending;
+        lock (_runLock)
+        {
+            wasPending = _runQueue.Remove(row);
+            if (wasPending)
+            {
+                _speedSamples.Remove(row);
+            }
+            else if (_activeIds.TryGetValue(row, out var id))
+            {
+                revokeId = id;
+                _activeIds.Remove(row);
+                _activeIdle.Remove(row);
+                _activeSince.Remove(row);
+                _speedSamples.Remove(row);
+            }
+        }
+        if (wasPending)
+        {
+            Post(() =>
+            {
+                _m.Queue.Remove(row);
+                UpdateQueueLabel();
+                _m.Status = "Removed from queue.";
+            });
+            return;
+        }
+        if (revokeId != null)
+            _server?.Revoke(revokeId);
+        Post(() =>
+        {
+            if (revokeId != null)
+            {
+                row.State = "failed";
+                row.Message = "cancelled";
+                row.CanResume = true;
+                _m.Status = "Cancelled — resume it from its row to re-queue.";
+            }
+            else
+            {
+                _m.Queue.Remove(row);
+            }
+            UpdateQueueLabel();
+        });
+    }
+
+    /// <summary>
+    /// Per-row pause/start. Pausing a still-queued row just parks it (the
+    /// worker skips it); pausing an active download revokes its URL like a
+    /// cancel, so the row stays resumable. Starting re-queues or resumes it
+    /// and wakes the worker if it went idle.
+    /// Called on UI thread.
+    /// </summary>
+    private void TogglePause(QueueItem row)
+    {
+        bool startWorker = false;
+        lock (_runLock)
+        {
+            if (!row.IsPaused)
+            {
+                row.IsPaused = true;
+                if (_activeIds.TryGetValue(row, out var id))
+                {
+                    _server?.Revoke(id);
+                    _activeIds.Remove(row);
+                    _activeIdle.Remove(row);
+                    _activeSince.Remove(row);
+                    _speedSamples.Remove(row);
+                    row.CanResume = true;
+                }
+                Post(() => row.Message = "paused");
+            }
+            else
+            {
+                row.IsPaused = false;
+                if (_runQueue.Contains(row))
+                {
+                    Post(() => row.Message = "waiting…");
+                }
+                else if (row.CanResume && row.Game != null &&
+                         _pathIds.ContainsKey(row.Game.Path))
+                {
+                    // Was mid-transfer when paused: resume it (same URL).
+                    ResumeRow(row); // re-entrant lock, restarts worker if needed
+                }
+                else
+                {
+                    Post(() => row.Message = "waiting…");
+                }
+                if (!_running)
+                {
+                    _running = true;
+                    startWorker = true;
+                }
+            }
+        }
+        if (startWorker)
+            _ = RunQueueAsync();
     }
 
     /// <summary>
@@ -372,6 +619,7 @@ public partial class LibraryView : UserControl
         _server?.Unrevoke(id);
         Post(() =>
         {
+            row.IsPaused = false;
             row.State = "sending";
             row.Message = "resuming… (resume it on the console too)";
             UpdateQueueLabel();
@@ -481,6 +729,7 @@ public partial class LibraryView : UserControl
                         IsFolder = g.Info.IsFolder,
                         ContentId = g.Info.ContentId,
                         Cover = g.Info.Cover,
+                        HasCover = g.Info.Cover != null,
                         IconData = g.Info.IconData,
                         IsPs5 = (g.Info.Platform ?? "").StartsWith("PS5"),
                         IsPs4 = (g.Info.Platform ?? "").StartsWith("PS4"),
@@ -492,6 +741,7 @@ public partial class LibraryView : UserControl
                     });
                 }
                 LinkFamilies();
+                WriteIconDiag();
                 ApplyFilter();
                 _m.Status = _all.Count == 0
                     ? (_roots.Count == 0 ? "Add a folder or drives first." : "No PKG files found.")
@@ -582,6 +832,37 @@ public partial class LibraryView : UserControl
         }
     }
 
+    /// <summary>
+    /// Icon diagnostic: one line per file (title, role, icon bytes + short
+    /// hash) so a wrong cover in family view can be traced to its source.
+    /// Written to %AppData%\PkgSender\icon-diag.log on every scan.
+    /// </summary>
+    private void WriteIconDiag()
+    {
+        try
+        {
+            var lines = new List<string> { $"scan {DateTime.Now:yyyy-MM-dd HH:mm:ss} ({_all.Count} files)" };
+            foreach (var g in _all.OrderBy(g => g.FamilyKey).ThenBy(g => g.Role))
+            {
+                int len = g.IconData?.Length ?? 0;
+                string hash = "";
+                if (len > 0)
+                {
+                    using var sha = System.Security.Cryptography.SHA1.Create();
+                    var h = sha.ComputeHash(g.IconData!);
+                    hash = " sha1:" + Convert.ToHexString(h)[..12];
+                }
+                lines.Add($"{g.FamilyKey} | {g.Role,-5} | icon={len}{hash} | {g.Title} | {g.Path}");
+            }
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PkgSender");
+            Directory.CreateDirectory(dir);
+            File.WriteAllLines(Path.Combine(dir, "icon-diag.log"), lines);
+        }
+        catch
+        {
+        }
+    }
+
     private void ApplyFilter()
     {
         string q = (_m.Search ?? "").Trim().ToLowerInvariant();
@@ -594,8 +875,35 @@ public partial class LibraryView : UserControl
                 continue;
             if (q.Length == 0 || g.Title.ToLowerInvariant().Contains(q) ||
                 g.ContentId.ToLowerInvariant().Contains(q) ||
+                g.FamilyKey.ToLowerInvariant().Contains(q) ||
                 Path.GetFileName(g.Path).ToLowerInvariant().Contains(q))
                 list.Add(g);
+        }
+        // Hide DLC/updates mode: collapse each family to its base Game(s).
+        // Clicking 🔗 sets Search = FamilyKey -> exact family view, which
+        // bypasses the collapse so updates/DLCs become visible.
+        if (_m.HideExtras)
+        {
+            bool isFamilyView = q.Length > 0 &&
+                _all.Any(a => string.Equals(a.FamilyKey.ToLowerInvariant(), q, StringComparison.Ordinal));
+            if (!isFamilyView)
+            {
+                var collapsed = new List<GameItem>();
+                foreach (var grp in list.GroupBy(g => g.FamilyKey))
+                {
+                    if (grp.Key.StartsWith("FILE:", StringComparison.Ordinal))
+                    {
+                        collapsed.AddRange(grp);
+                        continue;
+                    }
+                    var bases = grp.Where(g => g.Role == "Game").ToList();
+                    if (bases.Count > 0)
+                        collapsed.AddRange(bases);
+                    else
+                        collapsed.AddRange(grp); // DLC-only family: nothing to collapse to
+                }
+                list = collapsed;
+            }
         }
         IEnumerable<GameItem> MemberOrder(IEnumerable<GameItem> ms) => ms
             .OrderBy(g => RoleRank(g.Role))
@@ -619,6 +927,19 @@ public partial class LibraryView : UserControl
         foreach (var fam in orderedFams)
             foreach (var g in MemberOrder(fam))
                 _m.Games.Add(g);
+        bool filtering = q.Length > 0;
+        _m.IsFiltering = filtering;
+        if (filtering)
+        {
+            string raw = (_m.Search ?? "").Trim();
+            _m.FilterLabel = _m.Games.Count == 0
+                ? $"🔍 No matches for \"{raw}\""
+                : $"🔍 Filtered by \"{raw}\" — {_m.Games.Count} of {_all.Count} shown";
+        }
+        else
+        {
+            _m.FilterLabel = "";
+        }
         UpdateGamesLabel();
     }
 
@@ -662,6 +983,15 @@ public partial class LibraryView : UserControl
             _m.Status = "Select games first (Ctrl+click / Shift+click).";
             return;
         }
+        EnqueueGames(picked);
+    }
+
+    /// <summary>
+    /// Shared queue path for Send PKG and double-click: same dedupe,
+    /// resume and server rules, no duplicated logic.
+    /// </summary>
+    private void EnqueueGames(IEnumerable<GameItem> picked)
+    {
         var wanted = picked.Where(IsPkg).ToList();
         if (wanted.Count == 0)
         {
@@ -736,7 +1066,7 @@ public partial class LibraryView : UserControl
             {
                 var qi = new QueueItem { Game = g, State = "queued", Message = "waiting…" };
                 _m.Queue.Add(qi);
-                _runQueue.Enqueue(qi);
+                _runQueue.Add(qi);
             }
             alreadyRunning = _running;
             if (!alreadyRunning)
@@ -763,6 +1093,9 @@ public partial class LibraryView : UserControl
     private readonly Dictionary<QueueItem, string> _activeIds = new();
     private readonly Dictionary<QueueItem, int> _activeIdle = new();
     private readonly Dictionary<QueueItem, DateTime> _activeSince = new();
+    // ETA tracking: last (time, total served bytes) sample across ticks.
+    private DateTime _etaLastTime = DateTime.UtcNow;
+    private long _etaLastServed;
 
     private async Task RunQueueAsync()
     {
@@ -777,8 +1110,10 @@ public partial class LibraryView : UserControl
                 {
                     if (_stop)
                         break;
-                    toPush = _runQueue.ToList();
-                    _runQueue.Clear();
+                    // Paused rows stay queued until started again.
+                    toPush = _runQueue.Where(q => !q.IsPaused).ToList();
+                    foreach (var q in toPush)
+                        _runQueue.Remove(q);
                     hasActive = _activeIds.Count > 0;
                     if (toPush.Count == 0 && !hasActive)
                         break;
@@ -808,7 +1143,10 @@ public partial class LibraryView : UserControl
             List<string> revoked = new();
             lock (_runLock)
             {
-                if (!_stop && (_runQueue.Count > 0 || _activeIds.Count > 0))
+                // A queue of only paused rows is idle: the worker exits,
+                // Start restarts it.
+                bool pending = _runQueue.Any(q => !q.IsPaused);
+                if (!_stop && (pending || _activeIds.Count > 0))
                 {
                     done = false;
                 }
@@ -856,7 +1194,7 @@ public partial class LibraryView : UserControl
         {
             if (!_pathIds.TryGetValue(item.Game.Path, out id!))
             {
-                id = System.Threading.Interlocked.Increment(ref _nextId).ToString();
+                id = _sessionTag + "-" + System.Threading.Interlocked.Increment(ref _nextId).ToString();
                 _pathIds[item.Game.Path] = id;
             }
             // Fresh (re)push of an idle url: un-revoke (undo Stop) and zero
@@ -946,13 +1284,14 @@ public partial class LibraryView : UserControl
         DateTime pushedAt = DateTime.UtcNow;
         for (;;)
         {
-            if (_stop)
+            if (_stop || item.IsPaused)
             {
-                FailStopped(item, "stopped");
+                FailStopped(item, _stop ? "stopped" : "paused");
                 return;
             }
             long delta = _server!.ServedFor(id);
             var row = item;
+            string rsp = delta == 0 ? "" : TrackRowSpeed(item, delta);
             Post(() =>
             {
                 if (row.State == "sending")
@@ -960,7 +1299,8 @@ public partial class LibraryView : UserControl
                     row.Percent = size <= 0 ? 100 : Math.Min(100, delta * 100.0 / size);
                     row.Message = delta == 0
                         ? "queued on console…"
-                        : $"{Program.FormatSize(delta)} / {Program.FormatSize(size)}";
+                        : $"{Program.FormatSize(delta)} / {Program.FormatSize(size)}" +
+                          (string.IsNullOrEmpty(rsp) ? "" : $" • {rsp}");
                 }
             });
             if (delta >= size)
@@ -991,9 +1331,9 @@ public partial class LibraryView : UserControl
         bool supported = true;
         for (;;)
         {
-            if (_stop)
+            if (_stop || item.IsPaused)
             {
-                FailStopped(item, "stopped");
+                FailStopped(item, _stop ? "stopped" : "paused");
                 return;
             }
             bool busy;
@@ -1057,6 +1397,65 @@ public partial class LibraryView : UserControl
         });
     }
 
+    private static string FormatEta(double seconds)
+    {
+        if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds < 0)
+            return "calculating…";
+        var ts = TimeSpan.FromSeconds(seconds);
+        if (ts.TotalHours >= 1)
+            return $"≈ {(int)ts.TotalHours}h {ts.Minutes}m left";
+        if (ts.TotalMinutes >= 1)
+            return $"≈ {(int)ts.TotalMinutes}m {ts.Seconds:D2}s left";
+        return $"≈ {(int)ts.TotalSeconds}s left";
+    }
+
+    private static string FormatSpeed(double bps)
+    {
+        if (double.IsNaN(bps) || double.IsInfinity(bps) || bps < 0)
+            return "";
+        if (bps >= 1024 * 1024 * 1024)
+            return $"{bps / 1024 / 1024 / 1024:F1} GB/s";
+        if (bps >= 1024 * 1024)
+            return $"{bps / 1024 / 1024:F1} MB/s";
+        if (bps >= 1024)
+            return $"{bps / 1024:F0} KB/s";
+        return $"{bps:F0} B/s";
+    }
+
+    // Per-row speed samples (sliding ~3s window). Guarded by _runLock.
+    private readonly Dictionary<QueueItem, Queue<(DateTime T, long Bytes)>> _speedSamples = new();
+
+    /// <summary>Track one row's served bytes; returns "" until ~1s of samples.</summary>
+    private string TrackRowSpeed(QueueItem item, long bytes)
+    {
+        double speed = -1;
+        lock (_runLock)
+        {
+            if (!_speedSamples.TryGetValue(item, out var q))
+            {
+                q = new Queue<(DateTime, long)>();
+                _speedSamples[item] = q;
+            }
+            var now = DateTime.UtcNow;
+            q.Enqueue((now, bytes));
+            while (q.Count > 4)
+                q.Dequeue();
+            var first = q.Peek();
+            double dt = (now - first.T).TotalSeconds;
+            if (q.Count >= 2 && dt >= 1)
+                speed = Math.Max(0, (bytes - first.Bytes) / dt);
+        }
+        return speed < 0 ? "" : FormatSpeed(speed);
+    }
+
+    private void DropRowSpeed(QueueItem item)
+    {
+        lock (_runLock)
+        {
+            _speedSamples.Remove(item);
+        }
+    }
+
     /// <summary>
     /// Refresh per-file download progress from the server counters. Items the
     /// console fully pulled are marked sent; items it never starts (30 min)
@@ -1071,10 +1470,13 @@ public partial class LibraryView : UserControl
         }
         var done = new List<QueueItem>();
         var giveUp = new List<QueueItem>();
+        long totalSize = 0, totalServed = 0;
         foreach (var (item, id, _, _) in snap)
         {
             long size = item.Game.SizeBytes;
             long delta = _server!.ServedFor(id);
+            totalSize += size;
+            totalServed += Math.Min(delta, size);
             lock (_runLock)
             {
                 if (!_activeIds.ContainsKey(item))
@@ -1094,17 +1496,22 @@ public partial class LibraryView : UserControl
             if (!done.Contains(item) && !giveUp.Contains(item))
             {
                 var row = item;
+                string rsp = delta == 0 ? "" : TrackRowSpeed(item, delta);
                 Post(() =>
                 {
                     row.Percent = size <= 0 ? 100 : Math.Min(100, delta * 100.0 / size);
                     row.Message = delta == 0
                         ? "queued on console…"
-                        : $"{Program.FormatSize(delta)} / {Program.FormatSize(size)}";
+                        : $"{Program.FormatSize(delta)} / {Program.FormatSize(size)}" +
+                          (string.IsNullOrEmpty(rsp) ? "" : $" • {rsp}");
                 });
             }
         }
         if (done.Count == 0 && giveUp.Count == 0)
+        {
+            UpdateEta(snap.Count, totalSize, totalServed);
             return;
+        }
         lock (_runLock)
         {
             foreach (var item in done.Concat(giveUp))
@@ -1112,6 +1519,7 @@ public partial class LibraryView : UserControl
                 _activeIds.Remove(item);
                 _activeIdle.Remove(item);
                 _activeSince.Remove(item);
+                _speedSamples.Remove(item);
             }
         }
         foreach (var item in done)
@@ -1136,6 +1544,57 @@ public partial class LibraryView : UserControl
                 UpdateQueueLabel();
             });
         }
+        long remSize = 0, remServed = 0;
+        int remCount;
+        lock (_runLock)
+        {
+            remCount = _activeIds.Count;
+            foreach (var kv in _activeIds)
+            {
+                remSize += kv.Key.Game.SizeBytes;
+                remServed += Math.Min(_server!.ServedFor(kv.Value), kv.Key.Game.SizeBytes);
+            }
+        }
+        UpdateEta(remCount, remSize, remServed);
+    }
+
+    /// <summary>
+    /// Overall ETA + speed line for the compact bar (speed from the last
+    /// samples of total served bytes). Must be called holding _runLock
+    /// only for the remaining-count query — the Post itself is lock-free.
+    /// </summary>
+    private double _lastSpeed;
+
+    private void UpdateEta(int activeCount, long totalSize, long totalServed)
+    {
+        string eta, speed;
+        if (activeCount == 0)
+        {
+            eta = "";
+            speed = "";
+            _lastSpeed = 0;
+            _etaLastServed = 0;
+            _etaLastTime = DateTime.UtcNow;
+        }
+        else
+        {
+            var now = DateTime.UtcNow;
+            double dt = (now - _etaLastTime).TotalSeconds;
+            if (dt >= 1)
+            {
+                _lastSpeed = Math.Max(0, (totalServed - _etaLastServed) / dt);
+                _etaLastTime = now;
+                _etaLastServed = totalServed;
+            }
+            speed = FormatSpeed(_lastSpeed);
+            if (totalSize > 0 && totalServed >= totalSize)
+                eta = "finishing…";
+            else if (_lastSpeed > 0)
+                eta = FormatEta((totalSize - totalServed) / _lastSpeed);
+            else
+                eta = totalServed > 0 ? "stalled…" : "calculating…";
+        }
+        Post(() => { _m.EtaText = eta; _m.SpeedText = speed; });
     }
 
     private async Task SendFilesAsync(List<QueueItem> files)
