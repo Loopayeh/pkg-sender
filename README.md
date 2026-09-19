@@ -15,6 +15,17 @@ Get `PkgSender-Setup-X.Y.Z.exe` from [Releases](../../releases) — self-contain
 
 On first launch the About window opens (support links live there).
 
+## LAN connection
+
+**Via router (easiest):** plug the PC and the console into the same router (cable or Wi-Fi). Both get automatic addresses — the app finds the console by itself (receiver beacon first, LAN sweep as fallback).
+
+**Direct cable, no router:** set static addresses on the same subnet, e.g. PC `192.168.10.1` and console `192.168.10.2`, mask `255.255.255.0`.
+
+- On the console: Network settings → set up the connection with a manual IP address.
+- In the app: pick the PC address from the PC box, type the console IP, press **Test**.
+
+Automatic `169.254.x.x` addresses are ignored by design — always set static addresses for a direct cable.
+
 ## PS4
 
 Works with a jailbroken PS4 running a compatible package receiver (listening on port 12800): Test should go green and Send PKG works. Tick **PS4 console** above the queue — PS4 installs go strictly one-by-one (PS5 queues natively).
