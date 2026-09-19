@@ -12,7 +12,7 @@ public sealed class AppSettings
     public int ChunkSize { get; set; } = 2 * 1024 * 1024;
     public bool UpdateCheck { get; set; } = true;
     public bool AboutShown { get; set; } = false;
-    public bool Compact { get; set; } = true;
+    public bool Compact { get; set; } = false;
 
     public AppSettings()
     {

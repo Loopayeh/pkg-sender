@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -188,6 +189,18 @@ public partial class LibraryView : UserControl
                 g.IsSelected = selected.Contains(g);
             this.FindControl<Button>("BtnSend").IsEnabled = (box.SelectedItems?.Count ?? 0) > 0;
             UpdateGamesLabel();
+        };
+        // Dense grid: columns follow the panel width so cards always fill
+        // the row — no dead strip between the last card and the scrollbar.
+        var gamesList = this.FindControl<ListBox>("GamesList");
+        gamesList.LayoutUpdated += (_, _) =>
+        {
+            if (gamesList.ItemsPanelRoot is UniformGrid grid)
+            {
+                int cols = Math.Max(1, (int)(gamesList.Bounds.Width / 180));
+                if (grid.Columns != cols)
+                    grid.Columns = cols;
+            }
         };
         // Double-click a card: queue that game straight away (same rules as Send PKG).
         this.FindControl<ListBox>("GamesList").DoubleTapped += (_, e) =>

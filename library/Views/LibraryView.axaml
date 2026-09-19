@@ -104,12 +104,12 @@
                    SelectionMode="Multiple" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.ItemsPanel>
               <ItemsPanelTemplate>
-                <WrapPanel Orientation="Horizontal"/>
+                <UniformGrid Columns="4" HorizontalAlignment="Stretch"/>
               </ItemsPanelTemplate>
             </ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
               <DataTemplate>
-                <Border Width="170" CornerRadius="2" Margin="4"
+                <Border HorizontalAlignment="Stretch" CornerRadius="2" Margin="4"
                         Background="{Binding IsPs5, Converter={StaticResource Ps5CardBg}}"
                         BorderBrush="{Binding IsSelected, Converter={StaticResource SelBorder}}"
                         BorderThickness="2"
