@@ -116,16 +116,13 @@
                         Padding="10">
                   <Grid>
                     <StackPanel Spacing="6">
-                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
-                        <Border CornerRadius="{Binding ImageRadius}" ClipToBounds="True" Width="100" Height="100"
-                                Background="{Binding IsPs5, Converter={StaticResource Ps5ImgBg}}">
-                          <Grid>
-                            <Image Source="{Binding Cover}" IsVisible="{Binding HasCover}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            <TextBlock Text="📦" IsVisible="{Binding NoCover}" FontSize="44" Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                          </Grid>
-                        </Border>
-                        <Image Source="/Assets/logo.png" Width="34" Height="34" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                      </StackPanel>
+                      <Border CornerRadius="{Binding ImageRadius}" ClipToBounds="True" Height="{Binding $self.Bounds.Width}"
+                              Background="{Binding IsPs5, Converter={StaticResource Ps5ImgBg}}">
+                        <Grid>
+                          <Image Source="{Binding Cover}" IsVisible="{Binding HasCover}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                          <TextBlock Text="📦" IsVisible="{Binding NoCover}" FontSize="44" Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                      </Border>
                       <TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="13" Foreground="#F1F3F8" TextTrimming="CharacterEllipsis" MaxLines="1"/>
                       <TextBlock Text="{Binding Meta}" FontSize="11" Foreground="#8B93A5" TextTrimming="CharacterEllipsis" MaxLines="1"/>
                       <Grid ColumnDefinitions="*,Auto">
