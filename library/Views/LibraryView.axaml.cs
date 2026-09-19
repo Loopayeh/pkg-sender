@@ -81,8 +81,8 @@ public partial class LibraryView : UserControl
         this.FindControl<Button>("BtnAddFolder").Click += async (_, _) => await AddFolderAsync("Add a folder to scan for games");
         this.FindControl<Button>("BtnClearSearch").Click += (_, _) => _m.Search = "";
         this.FindControl<Button>("BtnClearFilter").Click += (_, _) => _m.Search = "";
-        this.FindControl<CheckBox>("CompactBox").Checked += (_, _) => SetCompact(true);
-        this.FindControl<CheckBox>("CompactBox").Unchecked += (_, _) => SetCompact(false);
+        this.FindControl<CheckBox>("CompactBox").Checked += (_, _) => { SetCompact(true); SaveCompact(true); };
+        this.FindControl<CheckBox>("CompactBox").Unchecked += (_, _) => { SetCompact(false); SaveCompact(false); };
         this.FindControl<Button>("BtnExpand").Click += (_, _) =>
         {
             var cb = this.FindControl<CheckBox>("CompactBox");
@@ -201,6 +201,27 @@ public partial class LibraryView : UserControl
         this.FindControl<ListBox>("QueueList").AddHandler(Button.ClickEvent, OnQueueButtonClick);
         // No auto-scan at startup: the user presses Scan when ready.
         _m.Status = _roots.Count == 0 ? "Add a folder or drives first." : "Press Scan to load the library.";
+        // Open minimal: compact view by default (queue only). Deferred so
+        // the window exists when SetCompact resizes it.
+        if (s.Compact)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                var cb = this.FindControl<CheckBox>("CompactBox");
+                if (cb != null) cb.IsChecked = true;
+            });
+        }
+    }
+
+    private static void SaveCompact(bool on)
+    {
+        try
+        {
+            var st = AppSettings.Load();
+            st.Compact = on;
+            st.Save();
+        }
+        catch { }
     }
 
     private static string AddrOf(string? item)

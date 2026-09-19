@@ -12,6 +12,7 @@ public sealed class AppSettings
     public int ChunkSize { get; set; } = 2 * 1024 * 1024;
     public bool UpdateCheck { get; set; } = true;
     public bool AboutShown { get; set; } = false;
+    public bool Compact { get; set; } = true;
 
     public AppSettings()
     {
@@ -46,6 +47,7 @@ public sealed class AppSettings
                     s.ChunkSize = loaded.ChunkSize;
                 s.UpdateCheck = loaded.UpdateCheck;
                 s.AboutShown = loaded.AboutShown;
+                s.Compact = loaded.Compact;
                 return s;
             }
         }
