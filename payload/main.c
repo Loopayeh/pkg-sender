@@ -1107,6 +1107,20 @@ pull_download(const char *url, const char *local)
 		close(s);
 		return 1; /* already there */
 	}
+	/* /data/homebrew may not exist yet — create the parent chain first */
+	{
+		char dir[PATH_MAX_V], *slash;
+
+		snprintf(dir, sizeof(dir), "%s", local);
+		slash = strrchr(dir, '/');
+		if (slash && slash != dir) {
+			*slash = '\0';
+			if (mkdir_p(dir) != 0) {
+				close(s);
+				return -1;
+			}
+		}
+	}
 	out = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (out < 0) {
 		close(s);
