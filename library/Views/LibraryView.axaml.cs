@@ -1159,6 +1159,16 @@ public partial class LibraryView : UserControl
             _m.Status = "No images in the selection — pick .exfat/.ffpkg/.ffpfsc rows (IMG badge).";
             return;
         }
+        if (string.IsNullOrWhiteSpace(_m.PsIp))
+        {
+            _m.Status = "No console address — set it at the top (Test to verify).";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_m.PcIp))
+        {
+            _m.Status = "No PC address selected — pick it at the top first.";
+            return;
+        }
         try
         {
             EnsureServer();
@@ -1188,7 +1198,7 @@ public partial class LibraryView : UserControl
             if (started)
                 ok++;
             else
-                _m.Status = $"Copy failed for {g.Title}: {Short(reply)}";
+                _m.Status = $"Copy failed for {g.Title}: {CopyHint(reply)}";
         }
         if (ok > 0)
             _m.Status = picked.Count == ok
@@ -1917,6 +1927,21 @@ public partial class LibraryView : UserControl
     }
 
     private static string Short(string s) => s.Length > 60 ? s[..60] : s;
+
+    /// <summary>
+    /// Translate the receiver's pull reply into an actionable hint:
+    /// old payload (no endpoint), TESTONLY build, or unreachable PC.
+    /// </summary>
+    private static string CopyHint(string reply)
+    {
+        if (reply.Contains("unknown endpoint"))
+            return "console runs an old payload — send the newest ELF first.";
+        if (reply.Contains("test build"))
+            return "console runs the TESTONLY payload — use the normal ELF.";
+        if (reply.Contains("bad url/path"))
+            return "receiver refused url/path (" + Short(reply) + ").";
+        return Short(reply);
+    }
 
     /// <summary>GitHub release check, mirroring pkg-viewer's check_updates.</summary>
     private async Task CheckUpdatesAsync(bool manual)

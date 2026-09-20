@@ -821,7 +821,7 @@ static const char UI_HTML[] =
 "button.danger{padding:10px 14px;background:#E17B7B;border:none;border-radius:4px;color:#171717;font-size:14px;font-weight:bold;cursor:pointer}"
 "#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}"
 ".card{background:#202020;border-radius:8px;padding:10px;text-align:center}"
-".card img{width:100%;height:120px;object-fit:contain;background:#171717;border-radius:8px}"
+".card img{width:100%;height:120px;object-fit:contain;background:#171717}"
 ".card .t{font-size:13px;margin:8px 0 2px;min-height:32px}"
 ".card .m{font-size:11px;color:#8B93A5;margin-bottom:8px}"
 ".card button{width:100%;padding:10px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer}"
