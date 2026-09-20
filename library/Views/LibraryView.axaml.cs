@@ -1233,6 +1233,8 @@ public partial class LibraryView : UserControl
                 UpdateQueueLabel();
                 // Follow the copy: poll the receiver's pull progress so a
                 // 36GB image doesn't look dead while it downloads.
+                long lastGot = 0;
+                DateTime lastT = DateTime.UtcNow;
                 for (int t = 0; t < 7200; t++)
                 {
                     await Task.Delay(3000);
@@ -1246,10 +1248,17 @@ public partial class LibraryView : UserControl
                         row.Message = want > 0 ? Program.FormatSize(want) + " copied" : "copied";
                         break;
                     }
+                    DateTime now = DateTime.UtcNow;
+                    double dt = (now - lastT).TotalSeconds;
+                    string spd = dt > 0.5 && got >= lastGot
+                        ? " • " + FormatSpeed((got - lastGot) / dt)
+                        : "";
+                    lastGot = got;
+                    lastT = now;
                     row.Percent = want > 0 ? Math.Min(100, got * 100.0 / want) : 0;
                     row.Message = want > 0
-                        ? $"{Program.FormatSize(got)} / {Program.FormatSize(want)}"
-                        : Program.FormatSize(got);
+                        ? $"{Program.FormatSize(got)} / {Program.FormatSize(want)}{spd}"
+                        : $"{Program.FormatSize(got)}{spd}";
                 }
                 if (row.State == "copying" && _m.Queue.Contains(row))
                 {
