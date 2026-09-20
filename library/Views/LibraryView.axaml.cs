@@ -1206,16 +1206,49 @@ public partial class LibraryView : UserControl
             string url = _server!.UrlFor(_m.PcIp, id);
             string remote = "/data/homebrew/" + Path.GetFileName(g.Path);
             _m.Status = $"Copying {g.Title} to homebrew…";
+            // Local preflight: can our own server serve this id at all?
+            string localCheck;
+            try
+            {
+                using var hc = new System.Net.Http.HttpClient(
+                    new System.Net.Http.HttpClientHandler { UseProxy = false })
+                    { Timeout = TimeSpan.FromSeconds(10) };
+                using var hr = await hc.SendAsync(new System.Net.Http.HttpRequestMessage(
+                    System.Net.Http.HttpMethod.Head, url));
+                localCheck = ((int)hr.StatusCode).ToString();
+            }
+            catch (Exception ex)
+            {
+                localCheck = "LOCAL-FAIL:" + Short(ex.Message);
+            }
             var (started, reply) = await LoopDPI.Core.ConsoleClient.PullAsync(_m.PsIp, url, remote);
+            PullLog($"{DateTime.Now:HH:mm:ss} {g.Title} local={localCheck} started={started} reply={reply}");
             if (started)
                 ok++;
             else
-                _m.Status = $"Copy failed for {g.Title}: {CopyHint(reply)}";
+                _m.Status = $"Copy failed for {g.Title}: local={localCheck} console={CopyHint(reply)}";
         }
         if (ok > 0)
             _m.Status = picked.Count == ok
                 ? $"Copy started for {ok} image(s) — watch the console notifications."
                 : $"Copy started for {ok}/{picked.Count} image(s), {picked.Count - ok} failed.";
+    }
+
+    /// <summary>
+    /// Append pull diagnostics (PC-side + console reply) for copy debugging.
+    /// </summary>
+    private static void PullLog(string line)
+    {
+        try
+        {
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PkgSender");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "pull-debug.log"), line + Environment.NewLine);
+        }
+        catch
+        {
+        }
     }
 
     private void EnsureServer()
