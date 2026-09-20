@@ -17,7 +17,7 @@ public static class LibraryScanner
     private sealed record CachedGame(long Size, long Mtime, string Title, string ContentId, string TitleId, string Platform, string Description, string IconB64, string Format, bool IsFolder, string Version, string ContentType, bool IsDlc);
     private sealed record CacheFile(List<string> Roots, Dictionary<string, CachedGame> Games, int Version);
 
-    private const int CacheVersion = 5; // bump when parsing changes (icons/formats)
+    private const int CacheVersion = 6; // bump when parsing changes (icons/formats)
 
     public static List<string> LoadRoots()
     {
@@ -290,6 +290,9 @@ public static class LibraryScanner
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
+                // Drop renamed/deleted entries so stale stubs never come back.
+                foreach (var k in cache.Keys.Where(k => !seen.Contains(k)).ToList())
+                    cache.Remove(k);
                 File.WriteAllText(CachePath, JsonSerializer.Serialize(new CacheFile(roots, cache, CacheVersion)));
             }
             catch

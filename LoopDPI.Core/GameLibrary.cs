@@ -278,7 +278,9 @@ public static class ImageStub
     public static PkgInfo Read(string path)
     {
         string low = path.ToLowerInvariant();
-        string fmt = low.EndsWith(".ffpfsc") ? "ffpfsc" : "ffpkg";
+        string fmt = low.EndsWith(".ffpfsc") ? "ffpfsc"
+            : low.EndsWith(".exfat") ? "exfat"
+            : "ffpkg";
         string tid = GameReader.TitleIdFromName(path);
         long size = 0;
         try
