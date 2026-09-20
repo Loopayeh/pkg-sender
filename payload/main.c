@@ -481,6 +481,7 @@ send_html(int fd, const char *body)
 	    "HTTP/1.0 200 OK\r\n"
 	    "Content-Type: text/html; charset=utf-8\r\n"
 	    "Content-Length: %lu\r\n"
+	    "Cache-Control: no-store\r\n"
 	    "Connection: close\r\n"
 	    "\r\n", (unsigned long)strlen(body));
 
