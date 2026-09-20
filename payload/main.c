@@ -889,8 +889,9 @@ static const char UI_HTML[] =
 "var mode='overwrite';"
 "try{var st=await fetch('/api/files/stat?path='+encodeURIComponent('/data/homebrew/'+file));"
 "var sj=await st.json();"
-"if(sj.exists&&size>0&&sj.size===size){msg.textContent=file+' is already there.';return;}"
-"if(sj.exists&&sj.size>0&&sj.size<size)"
+"if(sj.exists&&size>0&&sj.size===size)"
+"{if(!confirm(file+' is already there. OK = Overwrite, Cancel = stop.'))return;mode='overwrite';}"
+"else if(sj.exists&&sj.size>0&&sj.size<size)"
 "mode=confirm('Partial copy on console ('+fmtSize(sj.size)+' of '+fmtSize(size)+'). OK = Resume, Cancel = Overwrite from zero.')?'resume':'overwrite';}"
 "catch(ex){}"
 "try{var r=await fetch('/api/files/pull',{method:'POST',headers:{'Content-Type':'application/json'},"
@@ -1054,7 +1055,7 @@ static volatile long long g_pull_want = -1;
 static char g_pull_name[128];
 
 /* 0 = ok, 1 = skipped (same size present), -1 = error */
-#define PULL_SEGS 32
+#define PULL_SEGS 16
 #define PULL_CHUNK (1024 * 1024)
 
 typedef struct pull_seg {

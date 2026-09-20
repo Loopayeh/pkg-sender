@@ -1234,27 +1234,31 @@ public partial class LibraryView : UserControl
             _registry[id] = g.Path;
             string url = _server!.UrlFor(_m.PcIp, id);
             string remote = "/data/homebrew/" + Path.GetFileName(g.Path);
-            // Partial file on the console? Offer Resume / Overwrite / Cancel.
+            // File on the console? Always offer Overwrite; Resume only if partial.
             bool resume = false;
             {
                 var (exists, size) = await LoopDPI.Core.ConsoleClient.StatAsync(_m.PsIp, remote);
-                if (exists && size == g.SizeBytes && g.SizeBytes > 0)
+                if (exists && size >= 0)
                 {
-                    var doneRow = new QueueItem { Game = g, State = "sent", Message = "already there ✓", Percent = 100 };
-                    _m.Queue.Add(doneRow);
-                    UpdateQueueLabel();
-                    ok++;
-                    continue;
-                }
-                if (exists && size > 0 && size < g.SizeBytes)
-                {
+                    bool partial = size > 0 && size < g.SizeBytes;
+                    bool complete = g.SizeBytes > 0 && size == g.SizeBytes;
                     var owner = Top as Window;
                     var dlg = new CopyChoiceDialog(Path.GetFileName(g.Path),
-                        Program.FormatSize(size), Program.FormatSize(g.SizeBytes));
+                        Program.FormatSize(size), Program.FormatSize(g.SizeBytes), partial);
+                    if (complete)
+                        _m.Status = $"{g.Title} is already there — overwrite?";
                     await dlg.ShowDialog(owner);
                     if (dlg.Result == CopyChoiceDialog.Choice.Cancel)
                     {
                         _m.Status = $"Skipped {g.Title}.";
+                        continue;
+                    }
+                    if (complete && dlg.Result == CopyChoiceDialog.Choice.Resume)
+                    {
+                        var doneRow = new QueueItem { Game = g, State = "sent", Message = "already there ✓", Percent = 100 };
+                        _m.Queue.Add(doneRow);
+                        UpdateQueueLabel();
+                        ok++;
                         continue;
                     }
                     resume = dlg.Result == CopyChoiceDialog.Choice.Resume;
