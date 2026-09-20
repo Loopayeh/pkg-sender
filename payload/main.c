@@ -1045,30 +1045,26 @@ static volatile long long g_pull_want = -1;
 static char g_pull_name[128];
 
 /* 0 = ok, 1 = skipped (same size present), -1 = error */
-static int
-pull_download(const char *url, const char *local)
-{
-	const char *p = url + 7; /* skip http:// */
-	const char *slash = strchr(p, '/');
-	char host[256], get[URL_MAX], req[URL_MAX + 256];
-	char portstr[16] = "80";
-	struct addrinfo hints, *res = NULL, *rp;
-	int s = -1, out = -1;
-	ssize_t n;
-#define PULL_CHUNK (64 * 1024)
-	long long want = -1, got = 0;
-	struct stat st;
+#define PULL_SEGS 4
+#define PULL_CHUNK (256 * 1024)
 
-	if (!slash || (size_t)(slash - p) >= sizeof(host))
-		return -1;
-	memcpy(host, p, (size_t)(slash - p));
-	host[slash - p] = '\0';
-	snprintf(get, sizeof(get), "%s", slash);
-	p = strchr(host, ':');
-	if (p) {
-		snprintf(portstr, sizeof(portstr), "%s", p + 1);
-		host[p - host] = '\0';
-	}
+typedef struct pull_seg {
+	char host[256];
+	char portstr[16];
+	char get[URL_MAX];
+	char local[PATH_MAX_V];
+	long long start;
+	long long len;
+	int ok;
+} pull_seg_t;
+
+/* tuned socket (timeouts + big receive buffer), connected or -1 */
+static int
+pull_connect(const char *host, const char *portstr)
+{
+	struct addrinfo hints, *res = NULL, *rp;
+	int s = -1;
+
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
@@ -1084,12 +1080,7 @@ pull_download(const char *url, const char *local)
 		s = -1;
 	}
 	freeaddrinfo(res);
-	if (s < 0)
-		return -1;
-	/* a stalled tunnel must fail loudly, never hang the worker forever */
-	/* big receive buffer: the PS5 default is tiny and throttles bulk
-	 * downloads to a few MB/s (same class of fix as zftpd's tuning). */
-	{
+	if (s >= 0) {
 		struct timeval tv;
 		int rcv = 1024 * 1024;
 
@@ -1099,48 +1090,185 @@ pull_download(const char *url, const char *local)
 		setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 		setsockopt(s, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
 	}
-	snprintf(req, sizeof(req),
-	    "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
-	    get, host);
-	if (send(s, req, strlen(req), 0) < 0) {
-		close(s);
-		return -1;
+	return s;
+}
+
+/* read a response header block; 1 = 2xx headers in hs, 0 = fail */
+static int
+pull_headers(int s, char *hs, size_t hs_sz)
+{
+	char c;
+	size_t hl = 0;
+	ssize_t n = -1;
+
+	for (;;) {
+		n = recv(s, &c, 1, 0);
+		if (n <= 0)
+			break;
+		if (hl + 1 >= hs_sz)
+			break;
+		hs[hl++] = c;
+		hs[hl] = '\0';
+		if (hl >= 4 && !strcmp(hs + hl - 4, "\r\n\r\n"))
+			break;
 	}
-	/* read headers, find Content-Length */
+	if (n <= 0 || hl < 12 || strncmp(hs, "HTTP/", 5) != 0)
+		return 0;
+	return hs[9] == '2';
+}
+
+/* Content-Length value in a header block, or -1 */
+static long long
+pull_clen(const char *hs)
+{
+	const char *p = strstr(hs, "Content-Length:");
+
+	if (!p)
+		p = strstr(hs, "content-length:");
+	if (!p)
+		return -1;
+	return strtoll(p + 15, NULL, 10);
+}
+
+static ssize_t
+pull_send(int s, const char *b, size_t n)
+{
+	size_t off = 0;
+
+	while (off < n) {
+		ssize_t w = send(s, b + off, n - off, 0);
+
+		if (w < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		off += (size_t)w;
+	}
+	return (ssize_t)off;
+}
+
+/* one range segment: own connection, own fd, writes [start, start+len) */
+static void *
+pull_seg_worker(void *arg)
+{
+	pull_seg_t *sg = arg;
+	char req[URL_MAX + 256], hs[4096];
+	char *hb;
+	int s = -1, out = -1;
+	long long left;
+	ssize_t n;
+
+	sg->ok = 0;
+	s = pull_connect(sg->host, sg->portstr);
+	if (s < 0)
+		return NULL;
+	snprintf(req, sizeof(req),
+	    "GET %s HTTP/1.0\r\nHost: %s\r\n"
+	    "Range: bytes=%lld-%lld\r\nConnection: close\r\n\r\n",
+	    sg->get, sg->host, sg->start, sg->start + sg->len - 1);
+	if (pull_send(s, req, strlen(req)) < 0) {
+		close(s);
+		return NULL;
+	}
+	if (!pull_headers(s, hs, sizeof(hs))) {
+		close(s);
+		return NULL;
+	}
+	hb = malloc(PULL_CHUNK);
+	out = open(sg->local, O_WRONLY);
+	if (!hb || out < 0) {
+		free(hb);
+		if (out >= 0)
+			close(out);
+		close(s);
+		return NULL;
+	}
+	if (lseek(out, (off_t)sg->start, SEEK_SET) == (off_t)-1) {
+		free(hb);
+		close(out);
+		close(s);
+		return NULL;
+	}
+	left = sg->len;
+	while (left > 0) {
+		size_t want = (size_t)(left < PULL_CHUNK ? left : PULL_CHUNK);
+		size_t got = 0;
+
+		n = recv(s, hb, want, 0);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		if (n == 0)
+			break;
+		while (got < (size_t)n) {
+			ssize_t w = write(out, hb + got, (size_t)n - got);
+
+			if (w < 0) {
+				if (errno == EINTR)
+					continue;
+				break;
+			}
+			got += (size_t)w;
+		}
+		if (got != (size_t)n)
+			break;
+		left -= n;
+		__sync_fetch_and_add(&g_pull_got, n);
+	}
+	free(hb);
+	close(out);
+	close(s);
+	sg->ok = (left == 0);
+	return NULL;
+}
+
+/* 0 = ok, 1 = skipped (same size present), -1 = error */
+static int
+pull_download(const char *url, const char *local)
+{
+	const char *p = url + 7; /* skip http:// */
+	const char *slash = strchr(p, '/');
+	char host[256], get[URL_MAX], req[URL_MAX + 256];
+	char portstr[16] = "80";
+	int s = -1, out = -1;
+	ssize_t n;
+	long long want = -1, got = 0;
+	struct stat st;
+
+	if (!slash || (size_t)(slash - p) >= sizeof(host))
+		return -1;
+	memcpy(host, p, (size_t)(slash - p));
+	host[slash - p] = '\0';
+	snprintf(get, sizeof(get), "%s", slash);
+	p = strchr(host, ':');
+	if (p) {
+		snprintf(portstr, sizeof(portstr), "%s", p + 1);
+		host[p - host] = '\0';
+	}
+	/* size discovery first (HEAD): big files go multi-segment below */
 	{
 		char hs[4096];
-		char c;
-		size_t hl = 0;
-		for (;;) {
-			n = recv(s, &c, 1, 0);
-			if (n <= 0)
-				break;
-			if (hl + 1 >= sizeof(hs))
-				break;
-			hs[hl++] = c;
-			hs[hl] = '\0';
-			if (hl >= 4 && !strcmp(hs + hl - 4, "\r\n\r\n"))
-				break;
-		}
-		if (n <= 0 || hl < 12 || strncmp(hs, "HTTP/", 5) != 0) {
-			close(s);
+
+		s = pull_connect(host, portstr);
+		if (s < 0)
 			return -1;
-		}
-		if (hs[9] != '2') { /* not 2xx */
-			close(s);
-			return -1;
-		}
-		p = strstr(hs, "Content-Length:");
-		if (!p)
-			p = strstr(hs, "content-length:");
-		if (p)
-			want = strtoll(p + 15, NULL, 10);
+		snprintf(req, sizeof(req),
+		    "HEAD %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
+		    get, host);
+		if (pull_send(s, req, strlen(req)) < 0 ||
+		    !pull_headers(s, hs, sizeof(hs)))
+			want = -1;
+		else
+			want = pull_clen(hs);
+		close(s);
+		s = -1;
 	}
 	if (want >= 0 && stat(local, &st) == 0 &&
-	    (long long)st.st_size == want) {
-		close(s);
+	    (long long)st.st_size == want)
 		return 1; /* already there */
-	}
 	/* /data/homebrew may not exist yet — create the parent chain first */
 	{
 		char dir[PATH_MAX_V], *slash;
@@ -1149,11 +1277,74 @@ pull_download(const char *url, const char *local)
 		slash = strrchr(dir, '/');
 		if (slash && slash != dir) {
 			*slash = '\0';
-			if (mkdir_p(dir) != 0) {
-				close(s);
+			if (mkdir_p(dir) != 0)
 				return -1;
-			}
 		}
+	}
+	g_pull_want = want;
+	g_pull_got = 0;
+	if (want >= 2 * 1024 * 1024) {
+		/* ── fast path: PULL_SEGS parallel Range streams ── */
+		pull_seg_t segs[PULL_SEGS];
+		pthread_t tids[PULL_SEGS];
+		long long part = want / PULL_SEGS;
+		int i, spawned = 0;
+
+		out = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (out < 0)
+			return -1;
+		/* pre-size so every segment has its range on disk */
+		if (ftruncate(out, (off_t)want) != 0) {
+			close(out);
+			return -1;
+		}
+		close(out);
+		for (i = 0; i < PULL_SEGS; i++) {
+			snprintf(segs[i].host, sizeof(segs[i].host), "%s", host);
+			snprintf(segs[i].portstr, sizeof(segs[i].portstr), "%s", portstr);
+			snprintf(segs[i].get, sizeof(segs[i].get), "%s", get);
+			snprintf(segs[i].local, sizeof(segs[i].local), "%s", local);
+			segs[i].start = part * i;
+			segs[i].len = (i == PULL_SEGS - 1) ? (want - part * i) : part;
+			segs[i].ok = 0;
+			if (pthread_create(&tids[i], NULL, pull_seg_worker, &segs[i]) != 0)
+				break;
+			spawned++;
+		}
+		if (spawned != PULL_SEGS) {
+			for (i = 0; i < spawned; i++)
+				pthread_join(tids[i], NULL);
+			return -1;
+		}
+		for (i = 0; i < PULL_SEGS; i++)
+			pthread_join(tids[i], NULL);
+		for (i = 0; i < PULL_SEGS; i++)
+			if (!segs[i].ok)
+				return -1;
+		if (stat(local, &st) != 0 || (long long)st.st_size != want)
+			return -1;
+		return 0;
+	}
+	/* ── small/unknown size: classic single stream ── */
+	s = pull_connect(host, portstr);
+	if (s < 0)
+		return -1;
+	snprintf(req, sizeof(req),
+	    "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
+	    get, host);
+	if (pull_send(s, req, strlen(req)) < 0) {
+		close(s);
+		return -1;
+	}
+	{
+		char hs[4096];
+
+		if (!pull_headers(s, hs, sizeof(hs))) {
+			close(s);
+			return -1;
+		}
+		if (want < 0)
+			want = pull_clen(hs);
 	}
 	out = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	if (out < 0) {
@@ -1161,10 +1352,10 @@ pull_download(const char *url, const char *local)
 		return -1;
 	}
 	g_pull_want = want;
-	g_pull_got = 0;
-	/* heap, not stack: 64K would risk the worker thread's stack */
+	/* heap, not stack: PULL_CHUNK would risk the worker thread's stack */
 	{
 		char *hb = malloc(PULL_CHUNK);
+		int done = 0;
 
 		if (!hb) {
 			close(s);
@@ -1178,22 +1369,24 @@ pull_download(const char *url, const char *local)
 					continue;
 				break;
 			}
-			if (n == 0)
+			if (n == 0) {
+				done = 1;
 				break;
+			}
 			if (write(out, hb, (size_t)n) != n)
 				break;
 			got += n;
-			g_pull_got = got;
+			__sync_fetch_and_add(&g_pull_got, n);
 		}
 		free(hb);
+		close(s);
+		close(out);
+		if (!done)
+			return -1;
+		if (want >= 0 && got != want)
+			return -1;
+		return 0;
 	}
-	close(s);
-	close(out);
-	if (n != 0)
-		return -1;
-	if (want >= 0 && got != want)
-		return -1;
-	return 0;
 }
 
 static void *
