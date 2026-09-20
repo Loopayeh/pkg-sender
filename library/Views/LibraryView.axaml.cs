@@ -1151,6 +1151,18 @@ public partial class LibraryView : UserControl
     /// </summary>
     private async Task CopyImagesAsync(IEnumerable<GameItem>? only = null)
     {
+        try
+        {
+            await CopyImagesInnerAsync(only);
+        }
+        catch (Exception ex)
+        {
+            _m.Status = "Copy crashed: " + Short(ex.Message);
+        }
+    }
+
+    private async Task CopyImagesInnerAsync(IEnumerable<GameItem>? only = null)
+    {
         var picked = (only ?? GamesBox.SelectedItems?.Cast<GameItem>() ?? Enumerable.Empty<GameItem>())
             .Where(g => g.Role == "Image" && !g.IsFolder)
             .ToList();
