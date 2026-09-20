@@ -1041,7 +1041,8 @@ static const char UI_HTML[] =
 "async function copyImg(id,file,size){msg.textContent='Copying '+file+'...';"
 "var mode='overwrite';"
 "try{var st=await fetch('/api/files/stat?path='+encodeURIComponent('/data/homebrew/'+file));"
-"var sj=await st.json();"
+"var stx=await st.text();"
+"var sj=(stx.indexOf('error:')===0)?{exists:false,size:0}:JSON.parse(stx);"
 "if(sj.exists&&size>0&&sj.size===size)"
 "{if(!confirm(file+' is already there. OK = Overwrite, Cancel = stop.'))return;mode='overwrite';}"
 "else if(sj.exists&&sj.size>0&&sj.size<size)"
@@ -1141,7 +1142,9 @@ static const char UI_HTML[] =
 "fsApi('/api/fs/move',{src:fpath+'/'+name,dst:dst+'/'+name});}"
 "async function fsInfo(name){var fm=document.getElementById('fmsg');"
 "try{var r=await fetch('/api/fs/info?path='+encodeURIComponent(fpath+'/'+name));"
-"var j=await r.json();"
+"var txt=await r.text();"
+"if(txt.indexOf('error:')===0){fm.textContent=txt;return;}"
+"var j=JSON.parse(txt);"
 "fm.textContent=j.name+' • '+j.kind+' • '+fmtSize(j.size)+' • '+j.magic;}"
 "catch(ex){fm.textContent='Error: '+ex;}}"
 "async function fsLoad(){var fp=document.getElementById('fpath');fp.textContent=fpath;"
@@ -1920,7 +1923,8 @@ handle_client(int fd)
 		struct stat st;
 		const char *slash, *dot, *kind = "file";
 		char magic[33] = "";
-		char out[1024];
+		char out[2048];
+		int need;
 
 		if (!query_param(path, "path", rpath, sizeof(rpath)) ||
 		    fs_src_jail(rpath, local, sizeof(local)) != 0) {
@@ -1961,13 +1965,16 @@ handle_client(int fd)
 			}
 			slash = strrchr(local, '/');
 			json_escape(slash ? slash + 1 : local, escname, sizeof(escname));
-			snprintf(out, sizeof(out),
+			need = snprintf(out, sizeof(out),
 			    "{\"name\":\"%s\",\"kind\":\"%s\",\"size\":%lld,"
 			    "\"mtime\":%lld,\"magic\":\"%s\"}",
 			    escname, kind,
 			    S_ISDIR(st.st_mode) ? 0 : (long long)st.st_size,
 			    (long long)st.st_mtime, magic);
-			send_json(fd, out);
+			if (need < 0 || (size_t)need >= sizeof(out))
+				send_text(fd, "error:name too long");
+			else
+				send_json(fd, out);
 		}
 	} else if (!strcmp(method, "POST") &&
 	           !strncmp(path, "/api/fs/rename", 15)) {
