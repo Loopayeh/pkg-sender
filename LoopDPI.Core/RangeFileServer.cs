@@ -25,9 +25,11 @@ public sealed class CatalogEntry
     public string Version { get; init; } = "";
     public long Size { get; init; }
     public string SizeText { get; init; } = "";
-    public string Role { get; init; } = "Game"; // Game | Patch | DLC
+    public string Role { get; init; } = "Game"; // Game | Patch | DLC | Image
     public string FamilyKey { get; init; } = "";
     public string Platform { get; init; } = "";
+    public string Format { get; init; } = "pkg"; // pkg | exfat | ffpfsc | ffpkg
+    public string File { get; init; } = ""; // basename for copy-to-console
     public bool HasIcon { get; init; }
 }
 
@@ -185,6 +187,8 @@ public sealed class RangeFileServer : IDisposable
                             sb2.Append(",\"role\":\"").Append(JsonEscape(r.Role)).Append('"');
                             sb2.Append(",\"familyKey\":\"").Append(JsonEscape(r.FamilyKey)).Append('"');
                             sb2.Append(",\"platform\":\"").Append(JsonEscape(r.Platform)).Append('"');
+                            sb2.Append(",\"format\":\"").Append(JsonEscape(r.Format)).Append('"');
+                            sb2.Append(",\"file\":\"").Append(JsonEscape(r.File)).Append('"');
                             sb2.Append(",\"hasIcon\":").Append(r.HasIcon ? "true" : "false");
                             sb2.Append('}');
                         }

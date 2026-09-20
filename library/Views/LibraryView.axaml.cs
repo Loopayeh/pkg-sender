@@ -750,14 +750,17 @@ public partial class LibraryView : UserControl
                 }
                 foreach (var g in found)
                 {
-                    // PKG-only: images/folders are scanned for cache but hidden.
-                    if (g.Info.Format != "pkg" || g.Info.IsFolder)
+                    // Folders stay out (not single files); images ride along
+                    // for the console Images catalog, PKGs for Games.
+                    if (g.Info.IsFolder)
                         continue;
                     string gid = !string.IsNullOrWhiteSpace(g.Info.TitleId)
                         ? g.Info.TitleId : g.Info.ContentId;
                     string gver = string.IsNullOrWhiteSpace(g.Info.Version)
                         ? "" : " • v" + g.Info.Version.TrimStart('v', 'V');
-                    string role = g.Info.IsDlc ? "DLC"
+                    string fmt = string.IsNullOrEmpty(g.Info.Format) ? "pkg" : g.Info.Format;
+                    string role = fmt != "pkg" ? "Image"
+                        : g.Info.IsDlc ? "DLC"
                         : g.Info.ContentType.Equals("gp", StringComparison.OrdinalIgnoreCase) ? "Patch"
                         : "Game";
                     string meta = gid + gver + (role == "Game" ? "" : " • " + role);
@@ -771,7 +774,7 @@ public partial class LibraryView : UserControl
                         Platform = g.Info.Format == "pkg"
                             ? (string.IsNullOrWhiteSpace(g.Info.Platform) ? "PKG" : g.Info.Platform)
                             : $"{(string.IsNullOrWhiteSpace(g.Info.Platform) ? "PS5" : g.Info.Platform)} • {g.Info.Format}",
-                        Format = string.IsNullOrEmpty(g.Info.Format) ? "pkg" : g.Info.Format,
+                        Format = fmt,
                         IsFolder = g.Info.IsFolder,
                         ContentId = g.Info.ContentId,
                         TitleId = g.Info.TitleId ?? "",
@@ -1202,7 +1205,7 @@ public partial class LibraryView : UserControl
             }
             foreach (var g in snap)
             {
-                if (g.Format != "pkg" || g.IsFolder)
+                if (g.IsFolder)
                     continue;
                 string id;
                 lock (_runLock)
@@ -1231,6 +1234,8 @@ public partial class LibraryView : UserControl
                     Role = g.Role,
                     FamilyKey = g.FamilyKey,
                     Platform = g.IsPs4 ? "PS4" : "PS5",
+                    Format = g.Format,
+                    File = System.IO.Path.GetFileName(g.Path),
                     HasIcon = hasIcon,
                 });
             }

@@ -44,6 +44,8 @@
 #include <pthread.h>
 #include <dlfcn.h>
 #include <signal.h>
+#include <dirent.h>
+#include <netdb.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -625,6 +627,65 @@ mkdir_p(const char *path)
 	return 0;
 }
 
+/* ── /data file browser (Files tab) ────────────────────────────────────
+ * All paths stay inside FS_ROOT (/data); no ".." escapes; delete is
+ * files + empty dirs only (no recursive delete). */
+#define FS_ROOT "/data"
+#define FS_MAX_ENTRIES 2000
+
+static int
+fs_jail(const char *in, char *out, size_t sz)
+{
+	size_t pre = strlen(FS_ROOT);
+
+	if (!in || strlen(in) + 1 > sz)
+		return -1;
+	if (strcmp(in, FS_ROOT) != 0 && strncmp(in, FS_ROOT "/", pre + 1) != 0)
+		return -1;
+	if (strstr(in, ".."))
+		return -1;
+	strcpy(out, in);
+	return 0;
+}
+
+/* escape " \ and C0 controls for JSON */
+static void
+json_escape(const char *src, char *dst, size_t dst_sz)
+{
+	size_t o = 0;
+
+	while (*src && o + 1 < dst_sz) {
+		unsigned char c = (unsigned char)*src++;
+		if (c == '"' || c == '\\') {
+			if (o + 2 >= dst_sz)
+				break;
+			dst[o++] = '\\';
+			dst[o++] = (char)c;
+		} else if (c < 0x20) {
+			dst[o++] = ' ';
+		} else {
+			dst[o++] = (char)c;
+		}
+	}
+	dst[o] = '\0';
+}
+
+typedef struct fs_entry {
+	char name[256];
+	int is_dir;
+	long long size;
+} fs_entry_t;
+
+static int
+fs_entry_cmp(const void *a, const void *b)
+{
+	const fs_entry_t *x = a, *y = b;
+
+	if (x->is_dir != y->is_dir)
+		return y->is_dir - x->is_dir; /* dirs first */
+	return strcmp(x->name, y->name);
+}
+
 /* query key= -> decoded value (stops at & or space) */
 static int
 query_param(const char *path, const char *key, char *dst, size_t dst_sz)
@@ -741,58 +802,77 @@ static const char UI_HTML[] =
 "<!DOCTYPE html><html><head><meta charset=utf-8>"
 "<meta name=viewport content='width=device-width,initial-scale=1'>"
 "<title>pkg remote installer</title>"
-"<style>body{background:#101418;color:#eee;font-family:sans-serif;margin:0;padding:16px}"
-"h2{color:#7fd4ff;margin:0 0 12px}#tabs{display:flex;gap:8px;margin-bottom:14px}"
-"#tabs button{flex:1;padding:12px;background:#1c232c;border:1px solid #7fd4ff;border-radius:6px;color:#7fd4ff;font-size:16px;font-weight:bold;cursor:pointer}"
-"#tabs button.on{background:#7fd4ff;color:#101418}"
+"<style>body{background:#171717;color:#F1F3F8;font-family:'Segoe UI',sans-serif;margin:0;padding:16px}"
+"h2{color:#F1F3F8;margin:0 0 12px;font-size:20px}"
+"#tabs{display:flex;gap:8px;margin-bottom:14px}"
+"#tabs button{flex:1;padding:12px;background:#2A2A2A;border:none;border-radius:4px;color:#F1F3F8;font-size:15px;font-weight:bold;cursor:pointer}"
+"#tabs button.on{background:#4F8EF7;color:#171717}"
 "#pcrow{display:flex;gap:8px;margin-bottom:12px;align-items:center}"
-"#pcstat{font-size:13px;color:#8B93A5;white-space:nowrap}"
+"#pcstat{font-size:12px;color:#8B93A5;white-space:nowrap}"
 "#tools{display:flex;gap:8px;margin-bottom:12px}"
 "#tools input{flex:1}"
-"#chips{display:flex;gap:6px}"
-"#chips button{padding:12px 14px;background:#1c232c;border:1px solid #7fd4ff;border-radius:6px;color:#7fd4ff;font-size:14px;cursor:pointer}"
-"#chips button.on{background:#7fd4ff;color:#101418}"
-"#cfg{display:flex;gap:8px;margin-bottom:12px}"
-"input{flex:1;padding:12px;border:1px solid #7fd4ff;border-radius:6px;background:#0b0e12;color:#eee;font-size:15px}"
-"button.go{padding:12px;background:#7fd4ff;border:none;border-radius:6px;color:#101418;font-size:15px;font-weight:bold;cursor:pointer}"
+"#chips,#kind{display:flex;gap:6px}"
+"#chips button,#kind button{padding:12px 14px;background:#2A2A2A;border:none;border-radius:4px;color:#F1F3F8;font-size:14px;cursor:pointer}"
+"#chips button.on,#kind button.on{background:#4F8EF7;color:#171717}"
+"#kind{margin-bottom:12px}"
+"input{flex:1;padding:12px;border:1px solid #2A2A2A;border-radius:4px;background:#2A2A2A;color:#F1F3F8;font-size:15px}"
+"button.go{padding:12px 16px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-size:14px;font-weight:bold;cursor:pointer}"
+"button.gh{padding:10px 14px;background:#404040;border:none;border-radius:4px;color:#F1F3F8;font-size:14px;cursor:pointer}"
+"button.danger{padding:10px 14px;background:#E17B7B;border:none;border-radius:4px;color:#171717;font-size:14px;font-weight:bold;cursor:pointer}"
 "#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}"
-".card{background:#1c232c;border-radius:8px;padding:10px;text-align:center}"
-".card img{width:100%;height:120px;object-fit:contain;background:#0b0e12;border-radius:6px}"
+".card{background:#202020;border-radius:8px;padding:10px;text-align:center}"
+".card img{width:100%;height:120px;object-fit:contain;background:#171717;border-radius:8px}"
 ".card .t{font-size:13px;margin:8px 0 2px;min-height:32px}"
 ".card .m{font-size:11px;color:#8B93A5;margin-bottom:8px}"
-".card button{width:100%;padding:10px;background:#7fd4ff;border:none;border-radius:6px;color:#101418;font-weight:bold;cursor:pointer}"
-".fc{display:inline-block;font-size:11px;color:#7fd4ff;border:1px solid #7fd4ff;border-radius:10px;padding:2px 8px;margin-top:4px}"
+".card button{width:100%;padding:10px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer}"
+".big{font-size:44px}"
+".fc{display:inline-block;font-size:11px;color:#4F8EF7;border:1px solid #4F8EF7;border-radius:10px;padding:2px 8px;margin-top:4px}"
 ".fambox{margin-top:8px;display:flex;flex-direction:column;gap:6px}"
-".member{display:flex;gap:8px;align-items:center;background:#0b0e12;border-radius:6px;padding:8px;text-align:left}"
+".member{display:flex;gap:8px;align-items:center;background:#171717;border-radius:8px;padding:8px;text-align:left}"
 ".member .t{font-size:12px}.member .m{font-size:11px;color:#8B93A5}"
 ".member div:first-child{flex:1}"
-".rb{font-size:10px;color:#101418;background:#7fd4ff;border-radius:4px;padding:2px 6px;margin-right:6px}"
-".member button{padding:8px 12px;background:#7fd4ff;border:none;border-radius:6px;color:#101418;font-weight:bold;cursor:pointer}"
-"#msg{margin-top:14px;font-size:14px;min-height:20px}"
+".rb{font-size:10px;color:#171717;background:#4F8EF7;border-radius:4px;padding:2px 6px;margin-right:6px}"
+".member button{padding:8px 12px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer}"
+"#msg,#fmsg{margin-top:14px;font-size:13px;color:#8B93A5;min-height:20px}"
+"#crumb,#mkrow{display:flex;gap:8px;margin-bottom:12px;align-items:center}"
+"#fpath{font-size:13px;color:#8B93A5}"
+".frow{display:flex;gap:8px;align-items:center;background:#202020;border-radius:8px;padding:10px;margin-bottom:8px}"
+".frow div:first-child{flex:1;font-size:14px}"
+".frow .m{font-size:11px;color:#8B93A5}"
+".frow div:last-child{display:flex;gap:6px}</style></head><body>"
+
+"<h2>pkg remote installer</h2>"
 "form#mf{display:flex;flex-direction:column;gap:12px;width:90%;max-width:520px;margin:0 auto}</style></head><body>"
 "<h2>pkg remote installer</h2>"
-"<div id=tabs><button id=tabL class=on>Library</button><button id=tabM>Manual URL</button></div>"
+"<div id=tabs><button id=tabL class=on>Library</button><button id=tabF>Files</button></div>"
 "<div id=lib>"
 "<div id=pcrow><span id=pcstat>PC: ...</span>"
 "<input id=pc placeholder='PC address'><button class=go id=save>Save</button></div>"
 "<div id=tools><input id=q placeholder='Search title or ID...'>"
 "<div id=chips><button data-p=all class=on>All</button><button data-p=PS5>PS5</button><button data-p=PS4>PS4</button></div></div>"
+"<div id=kind><button data-k=games class=on>Games</button><button data-k=images>Images</button></div>"
 "<div id=grid></div><div id=msg></div></div>"
-"<div id=man style='display:none'><form id=mf><input id=url type=url placeholder='http://192.168.x.x:9898/game.pkg' required>"
-"<button class=go type=submit>Install PKG</button></form><div id=st style='text-align:center'></div></div>"
+"<div id=files style='display:none'>"
+"<div id=crumb><button class=gh id=up>Up</button><span id=fpath>/data</span></div>"
+"<div id=mkrow><input id=mkname placeholder='New folder name'><button class=go id=mkbtn>New folder</button></div>"
+"<div id=flist></div><div id=fmsg></div></div>"
 "<script>(function(){var pcEl=document.getElementById('pc');"
 "var pcstat=document.getElementById('pcstat');"
 "var grid=document.getElementById('grid');var msg=document.getElementById('msg');"
 "var qEl=document.getElementById('q');"
-"var all=[],openFam=null,plat='all';"
+"var all=[],openFam=null,plat='all',kind='games';"
+"var fpath='/data';"
 "pcEl.value=localStorage.getItem('pri_pc')||'';"
-"function show(which){document.getElementById('lib').style.display=which?'':'none';"
-"document.getElementById('man').style.display=which?'none':'';"
-"document.getElementById('tabL').className=which?'on':'';"
-"document.getElementById('tabM').className=which?'':'on';}"
+"function show(t){document.getElementById('lib').style.display=t?'':'none';"
+"document.getElementById('files').style.display=t?'none':'';"
+"document.getElementById('tabL').className=t?'on':'';"
+"document.getElementById('tabF').className=t?'':'on';"
+"if(!t)fsLoad();}"
 "document.getElementById('tabL').onclick=function(){show(1);};"
-"document.getElementById('tabM').onclick=function(){show(0);};"
+"document.getElementById('tabF').onclick=function(){show(0);};"
 "function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}"
+"function fmtSize(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';"
+"if(n<1073741824)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(2)+' GB';}"
 "function rank(r){return r==='Patch'?1:(r==='DLC'?2:0);}"
 "function lone(g){return (g.familyKey||'').indexOf('FILE:')===0;}"
 "function isBase(g){return g.role==='Game'||lone(g);}"
@@ -803,6 +883,13 @@ static const char UI_HTML[] =
 "try{var u='http://'+pcEl.value+':9898/pkg/'+encodeURIComponent(id);"
 "var r=await fetch('/install?url='+encodeURIComponent(u));"
 "msg.textContent=await r.text();}catch(ex){msg.textContent='Error: '+ex;}}"
+"async function copyImg(id,file){msg.textContent='Copying '+file+'...';"
+"try{var r=await fetch('/api/files/pull',{method:'POST',headers:{'Content-Type':'application/json'},"
+"body:JSON.stringify({url:'http://'+pcEl.value+':9898/pkg/'+id,path:'/data/homebrew/'+file})});"
+"var x=await r.text();"
+"msg.textContent=(x.indexOf('started')>=0)?'Copy started — watch the console notifications.':x;}"
+"catch(ex){msg.textContent='Error: '+ex;}}"
+"function imgIcon(f){if(f==='exfat')return '💽';if(f==='ffpkg'||f==='ffpfsc')return '🗜';return '📦';}"
 "function card(g,sub){var d=document.createElement('div');d.className=sub?'member':'card';"
 "var im=(!sub&&g.hasIcon)?'<img src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'';"
 "var meta=esc(g.titleId||'');if(g.version)meta+=' v'+esc(g.version);"
@@ -813,7 +900,11 @@ static const char UI_HTML[] =
 "var b=document.createElement('button');b.textContent='Install';"
 "b.onclick=function(ev){ev.stopPropagation();install(g.id,g.title);};"
 "w.appendChild(b);d.appendChild(w);return d;}"
-"var fam=all.filter(function(m){return !isBase(m)&&m.familyKey===g.familyKey;});"
+"if(kind==='images'){"
+"d.innerHTML='<div class=big>'+imgIcon(g.format)+'</div><div class=t>'+esc(g.title)+'</div><div class=m>'+esc(g.format)+' &middot; '+esc(g.sizeText||'')+'</div>';"
+"var cb=document.createElement('button');cb.textContent='Copy to homebrew';"
+"cb.onclick=function(ev){ev.stopPropagation();copyImg(g.id,g.file||g.title);};d.appendChild(cb);return d;}"
+"var fam=all.filter(function(m){return m.format==='pkg'&&!isBase(m)&&m.familyKey===g.familyKey;});"
 "fam.sort(function(a,b){return rank(a.role)-rank(b.role);});"
 "var cnt=fam.length?'<span class=fc>'+fam.length+' add-on'+(fam.length>1?'s':'')+'</span>':'';"
 "d.innerHTML=im+'<div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div>'+cnt;"
@@ -824,8 +915,13 @@ static const char UI_HTML[] =
 "fam.forEach(function(m){box.appendChild(card(m,1));});"
 "var wrap=document.createElement('div');wrap.appendChild(d);wrap.appendChild(box);return wrap;}"
 "return d;}"
-"function render(){grid.innerHTML='';"
-"var bases=all.filter(function(g){return isBase(g)&&matchP(g)&&matchQ(g);});"
+"function render(){grid.innerHTML='';var list;"
+"if(kind==='images'){list=all.filter(function(g){return g.format!=='pkg'&&matchP(g)&&matchQ(g);});"
+"list.sort(function(a,b){return a.title.toLowerCase()<b.title.toLowerCase()?-1:1;});"
+"if(!list.length){msg.textContent=all.length?'No match.':'Library is empty — tick Publish library in PKG Sender.';return;}"
+"msg.textContent=list.length+' images';"
+"list.forEach(function(g){grid.appendChild(card(g,0));});return;}"
+"var bases=all.filter(function(g){return g.format==='pkg'&&isBase(g)&&matchP(g)&&matchQ(g);});"
 "bases.sort(function(a,b){return a.title.toLowerCase()<b.title.toLowerCase()?-1:1;});"
 "if(!bases.length){msg.textContent=all.length?'No match.':'Library is empty — tick Publish library in PKG Sender.';return;}"
 "msg.textContent=bases.length+' games';"
@@ -842,19 +938,49 @@ static const char UI_HTML[] =
 "try{var r=await fetch('http://'+pc+':9898/catalog');"
 "all=await r.json();openFam=null;render();}"
 "catch(ex){msg.textContent='Error: '+ex+' — is Publish library on and the PC reachable?';}}"
+"function frow(e){var d=document.createElement('div');d.className='frow';"
+"var ic=e.dir?'📁':'📄';"
+"var sub=e.dir?'':(' &middot; '+fmtSize(e.size));"
+"d.innerHTML='<div><span>'+ic+'</span> '+esc(e.name)+'<div class=m>'+(e.dir?'folder':('file'+sub))+'</div></div>';"
+"var w=document.createElement('div');"
+"if(e.dir){var o=document.createElement('button');o.className='gh';o.textContent='Open';"
+"o.onclick=function(){fpath=fpath+'/'+e.name;fsLoad();};w.appendChild(o);}"
+"var del=document.createElement('button');del.className='danger';del.textContent='Delete';"
+"del.onclick=function(){if(confirm('Delete '+e.name+'?'))fsDel(e.name);};w.appendChild(del);"
+"d.appendChild(w);return d;}"
+"async function fsLoad(){var fp=document.getElementById('fpath');fp.textContent=fpath;"
+"var fl=document.getElementById('flist');var fm=document.getElementById('fmsg');"
+"fm.textContent='Loading...';fl.innerHTML='';"
+"try{var r=await fetch('/api/fs/list?path='+encodeURIComponent(fpath));"
+"var txt=await r.text();"
+"if(txt.indexOf('error:')===0){fm.textContent=txt;return;}"
+"var j=JSON.parse(txt);fm.textContent=j.entries.length+' entries'+(j.truncated?' (truncated)':'');"
+"j.entries.forEach(function(e){fl.appendChild(frow(e));});}"
+"catch(ex){fm.textContent='Error: '+ex;}}"
+"async function fsDel(name){var fm=document.getElementById('fmsg');"
+"try{var r=await fetch('/api/fs/delete',{method:'POST',headers:{'Content-Type':'application/json'},"
+"body:JSON.stringify({path:fpath+'/'+name})});"
+"var x=await r.text();fm.textContent=x;if(x.indexOf('ok')>=0)fsLoad();}"
+"catch(ex){fm.textContent='Error: '+ex;}}"
+"async function fsMkdir(){var inp=document.getElementById('mkname');var nm=inp.value.trim();"
+"if(!nm)return;var fm=document.getElementById('fmsg');"
+"try{var r=await fetch('/api/files/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},"
+"body:JSON.stringify({path:fpath+'/'+nm})});"
+"var x=await r.text();fm.textContent=x;inp.value='';fsLoad();}"
+"catch(ex){fm.textContent='Error: '+ex;}}"
 "document.getElementById('save').onclick=load;"
+"document.getElementById('mkbtn').onclick=fsMkdir;"
+"document.getElementById('up').onclick=function(){if(fpath!=='/data'){var i=fpath.lastIndexOf('/');fpath=i>0?fpath.substring(0,i):'/data';fsLoad();}};"
 "qEl.oninput=render;"
 "var chips=document.getElementById('chips').children;"
 "for(var i=0;i<chips.length;i++)(function(c){c.onclick=function(){plat=c.getAttribute('data-p');"
 "for(var k=0;k<chips.length;k++)chips[k].className='';c.className='on';render();};})(chips[i]);"
-"document.getElementById('mf').onsubmit=async function(e){e.preventDefault();"
-"var u=document.getElementById('url').value;"
-"document.getElementById('st').textContent='Installing...';"
-"try{var r=await fetch('/install?url='+encodeURIComponent(u));"
-"var x=await r.text();document.getElementById('st').textContent=x;}"
-"catch(ex){document.getElementById('st').textContent='Error: '+ex;}};"
+"var kinds=document.getElementById('kind').children;"
+"for(var j=0;j<kinds.length;j++)(function(c){c.onclick=function(){kind=c.getAttribute('data-k');"
+"for(var k=0;k<kinds.length;k++)kinds[k].className='';c.className='on';render();};})(kinds[j]);"
 "load();})();</script>"
 "</body></html>";
+
 #endif
 
 /* human text for install errors (-1/-2 are ours, rest are SCE codes) */
@@ -888,6 +1014,149 @@ do_install_reply_text(int fd, const char *url, const char *name,
 	else
 		snprintf(out, sizeof(out), "error:queue failed");
 	send_text(fd, out);
+}
+
+/* ── Pull downloader (Images tab: copy PC file -> /data/homebrew) ─────
+ * Plain sequential HTTP GET (http only, the PC serves plain http).
+ * Runs on a detached worker; skips when the same size is already there. */
+typedef struct pull_job {
+	char url[URL_MAX];
+	char local[PATH_MAX_V];
+} pull_job_t;
+
+/* 0 = ok, 1 = skipped (same size present), -1 = error */
+static int
+pull_download(const char *url, const char *local)
+{
+	const char *p = url + 7; /* skip http:// */
+	const char *slash = strchr(p, '/');
+	char host[256], get[URL_MAX], req[URL_MAX + 256];
+	char portstr[16] = "80";
+	struct addrinfo hints, *res = NULL, *rp;
+	int s = -1, out = -1;
+	char hb[8192];
+	ssize_t n;
+	long long want = -1, got = 0;
+	struct stat st;
+
+	if (!slash || (size_t)(slash - p) >= sizeof(host))
+		return -1;
+	memcpy(host, p, (size_t)(slash - p));
+	host[slash - p] = '\0';
+	snprintf(get, sizeof(get), "%s", slash);
+	p = strchr(host, ':');
+	if (p) {
+		snprintf(portstr, sizeof(portstr), "%s", p + 1);
+		host[p - host] = '\0';
+	}
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	if (getaddrinfo(host, portstr, &hints, &res) != 0 || !res)
+		return -1;
+	for (rp = res; rp; rp = rp->ai_next) {
+		s = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+		if (s < 0)
+			continue;
+		if (connect(s, rp->ai_addr, rp->ai_addrlen) == 0)
+			break;
+		close(s);
+		s = -1;
+	}
+	freeaddrinfo(res);
+	if (s < 0)
+		return -1;
+	snprintf(req, sizeof(req),
+	    "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
+	    get, host);
+	if (send(s, req, strlen(req), 0) < 0) {
+		close(s);
+		return -1;
+	}
+	/* read headers, find Content-Length */
+	{
+		char hs[4096];
+		size_t hl = 0;
+		for (;;) {
+			n = recv(s, hb, 1, 0);
+			if (n <= 0)
+				break;
+			if (hl + 1 >= sizeof(hs))
+				break;
+			hs[hl++] = hb[0];
+			hs[hl] = '\0';
+			if (hl >= 4 && !strcmp(hs + hl - 4, "\r\n\r\n"))
+				break;
+		}
+		if (n <= 0 || hl < 12 || strncmp(hs, "HTTP/", 5) != 0) {
+			close(s);
+			return -1;
+		}
+		if (hs[9] != '2') { /* not 2xx */
+			close(s);
+			return -1;
+		}
+		p = strstr(hs, "Content-Length:");
+		if (!p)
+			p = strstr(hs, "content-length:");
+		if (p)
+			want = strtoll(p + 15, NULL, 10);
+	}
+	if (want >= 0 && stat(local, &st) == 0 &&
+	    (long long)st.st_size == want) {
+		close(s);
+		return 1; /* already there */
+	}
+	out = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (out < 0) {
+		close(s);
+		return -1;
+	}
+	for (;;) {
+		n = recv(s, hb, sizeof(hb), 0);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		if (n == 0)
+			break;
+		if (write(out, hb, (size_t)n) != n)
+			break;
+		got += n;
+	}
+	close(s);
+	close(out);
+	if (n != 0)
+		return -1;
+	if (want >= 0 && got != want)
+		return -1;
+	return 0;
+}
+
+static void *
+pull_worker(void *arg)
+{
+	pull_job_t *job = arg;
+	char toast[256], base[128];
+	const char *b = strrchr(job->local, '/');
+	int rc;
+
+	snprintf(base, sizeof(base), "%s", b ? b + 1 : job->local);
+	__sync_fetch_and_add(&g_active_installs, 1);
+	rc = pull_download(job->url, job->local);
+	__sync_fetch_and_sub(&g_active_installs, 1);
+	if (rc == 0)
+		snprintf(toast, sizeof(toast), "Loopayeh: copied %s", base);
+	else if (rc == 1)
+		snprintf(toast, sizeof(toast),
+		    "Loopayeh: %s already there", base);
+	else
+		snprintf(toast, sizeof(toast),
+		    "Loopayeh: copy failed %s", base);
+	notify_user(toast);
+	free(job);
+	return NULL;
 }
 
 static void
@@ -1027,6 +1296,105 @@ handle_client(int fd)
 		snprintf(out, sizeof(out), "{\"pc\":\"%s\",\"age\":%ld}",
 		    g_pc_addr, age);
 		send_json(fd, out);
+	} else if (!strcmp(method, "GET") &&
+	           !strncmp(path, "/api/fs/list", 13)) {
+		char rpath[PATH_MAX_V], local[PATH_MAX_V];
+		char escpath[PATH_MAX_V * 2];
+		DIR *dp;
+		struct dirent *de;
+		fs_entry_t *ents;
+		size_t n = 0;
+		char *json;
+		size_t jlen = 65536, joff;
+		int truncated = 0;
+
+		if (!query_param(path, "path", rpath, sizeof(rpath)) ||
+		    fs_jail(rpath, local, sizeof(local)) != 0) {
+			send_text(fd, "error:bad path");
+		} else if (!(dp = opendir(local))) {
+			send_text(fd, "error:not a directory");
+		} else {
+			ents = malloc(sizeof(fs_entry_t) * FS_MAX_ENTRIES);
+			if (ents) {
+				while (n < FS_MAX_ENTRIES &&
+				    (de = readdir(dp)) != NULL) {
+					int is_dir;
+					if (!strcmp(de->d_name, ".") ||
+					    !strcmp(de->d_name, ".."))
+						continue;
+					if (de->d_type == DT_UNKNOWN) {
+						char full[PATH_MAX_V * 2];
+						struct stat st;
+						snprintf(full, sizeof(full),
+						    "%s/%s", local, de->d_name);
+						is_dir = stat(full, &st) == 0 &&
+						    S_ISDIR(st.st_mode);
+					} else {
+						is_dir = de->d_type == DT_DIR;
+					}
+					snprintf(ents[n].name,
+					    sizeof(ents[n].name), "%s",
+					    de->d_name);
+					ents[n].is_dir = is_dir;
+					ents[n].size = 0;
+					if (!is_dir) {
+						char full[PATH_MAX_V * 2];
+						struct stat st;
+						snprintf(full, sizeof(full),
+						    "%s/%s", local, de->d_name);
+						if (stat(full, &st) == 0)
+							ents[n].size =
+							    (long long)st.st_size;
+					}
+					n++;
+				}
+				if (n == FS_MAX_ENTRIES &&
+				    readdir(dp) != NULL)
+					truncated = 1;
+				qsort(ents, n, sizeof(fs_entry_t),
+				    fs_entry_cmp);
+			}
+			closedir(dp);
+			json_escape(local, escpath, sizeof(escpath));
+			json = malloc(jlen);
+			if (!ents || !json) {
+				free(ents);
+				free(json);
+				send_text(fd, "error:out of memory");
+			} else {
+				size_t i, toff;
+				joff = (size_t)snprintf(json, jlen,
+				    "{\"path\":\"%s\",\"truncated\":",
+				    escpath);
+				toff = joff; /* single flag digit patched below */
+				joff += (size_t)snprintf(json + joff,
+				    jlen - joff, "0,\"entries\":[");
+				for (i = 0; i < n; i++) {
+					char nm[512], row[800];
+					int need;
+					json_escape(ents[i].name, nm,
+					    sizeof(nm));
+					need = snprintf(row, sizeof(row),
+					    "%s{\"name\":\"%s\",\"dir\":%s,\"size\":%lld}",
+					    i ? "," : "", nm,
+					    ents[i].is_dir ? "true" : "false",
+					    ents[i].size);
+					if (joff + (size_t)need + 32 >= jlen) {
+						truncated = 1;
+						break;
+					}
+					memcpy(json + joff, row,
+					    (size_t)need);
+					joff += (size_t)need;
+				}
+				free(ents);
+				if (truncated)
+					json[toff] = '1';
+				memcpy(json + joff, "]}", 3);
+				send_json(fd, json);
+				free(json);
+			}
+		}
 	} else if (!strcmp(method, "GET")) {
 		send_html(fd, UI_HTML);
 	} else if (!strcmp(method, "POST") &&
@@ -1148,6 +1516,61 @@ handle_client(int fd)
 			snprintf(toast, sizeof(toast),
 			    "Loopayeh: received %s", base);
 			notify_user(toast);
+		}
+	} else if (!strcmp(method, "POST") &&
+	           !strncmp(path, "/api/fs/delete", 14)) {
+		char rpath[PATH_MAX_V], local[PATH_MAX_V];
+		struct stat st;
+
+		if (!json_string(body, "path", rpath, sizeof(rpath)) ||
+		    fs_jail(rpath, local, sizeof(local)) != 0) {
+			send_text(fd, "error:bad path");
+		} else if (!strcmp(local, FS_ROOT)) {
+			send_text(fd, "error:refusing to delete root");
+		} else if (stat(local, &st) != 0) {
+			send_text(fd, "error:not found");
+		} else if (S_ISDIR(st.st_mode)) {
+			if (rmdir(local) == 0) {
+				send_json(fd, "{\"ok\":true}");
+			} else {
+				send_text(fd, "error:not empty");
+			}
+		} else {
+			if (unlink(local) == 0) {
+				send_json(fd, "{\"ok\":true}");
+			} else {
+				send_text(fd, "error:delete failed");
+			}
+		}
+	} else if (!strcmp(method, "POST") &&
+	           !strncmp(path, "/api/files/pull", 15)) {
+		char url[URL_MAX], rpath[PATH_MAX_V], local[PATH_MAX_V];
+
+		if (!json_string(body, "url", url, sizeof(url)) ||
+		    !json_string(body, "path", rpath, sizeof(rpath)) ||
+		    strncmp(url, "http://", 7) != 0 ||
+		    jail_path(rpath, local, sizeof(local)) != 0) {
+			send_text(fd, "error:bad url/path");
+		} else {
+			pull_job_t *job = malloc(sizeof(*job));
+			pthread_t tid;
+			if (!job) {
+				send_text(fd, "error:out of memory");
+			} else {
+				snprintf(job->url, sizeof(job->url),
+				    "%s", url);
+				snprintf(job->local, sizeof(job->local),
+				    "%s", local);
+				if (pthread_create(&tid, NULL, pull_worker,
+				    job) != 0) {
+					free(job);
+					send_text(fd, "error:worker failed");
+				} else {
+					pthread_detach(tid);
+					send_json(fd,
+					    "{\"ok\":true,\"started\":true}");
+				}
+			}
 		}
 	} else {
 		send_text(fd, "Loopayeh: unknown endpoint");

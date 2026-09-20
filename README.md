@@ -96,6 +96,9 @@ under `/data/homebrew`. This API is not stable and may change between versions.
 | POST | `/api/files/mkdir` | `{"path":"..."}` | `{"ok":true}` or `error:...` |
 | POST | `/api/files/write?path=&offset=` | raw bytes, offset in bytes | `{"ok":true}` or `error:...` |
 | POST | `/api/files/done` | `{"path":"...","size":N}` (verifies size) | `{"ok":true,"size":N}` or `error:size mismatch` |
+| POST | `/api/files/pull` | `{"url":"http://pc:9898/pkg/id","path":"/data/homebrew/f.pkg"}` (receiver downloads it itself) | `{"ok":true,"started":true}` + console toast on finish |
+| GET | `/api/fs/list?path=` | path under `/data` | `{"path","truncated":bool,"entries":[{"name","dir":bool,"size"}]}` |
+| POST | `/api/fs/delete` | `{"path":"..."}` (files + empty dirs only, never `/data` itself) | `{"ok":true}` or `error:...` |
 
 Discovery: the receiver broadcasts `PKGSENDER v1` to UDP `255.255.255.255:12801`
 every 3 seconds.
@@ -115,13 +118,17 @@ no need to walk back to the PC:
 3. **Library tab**: base games only (alphabetical, with covers, sizes and IDs);
    click a base game to expand its updates/DLCs, each with its own Install
    button. Search filters by title or Title ID; chips filter PS5/PS4.
-   **Manual URL tab** keeps the old paste-a-link form as fallback.
+   The **Games/Images** switch shows disc images (exfat/ffpfsc/ffpkg) with a
+   **Copy to homebrew** button each (copies into `/data/homebrew`, skips if
+   the same size is already there).
+4. **Files tab**: browse `/data` on the console (breadcrumb + Up), create
+   folders, delete files/empty folders (with confirm). No recursive delete.
 
 Published endpoints on the PC file server (`:9898`, PKG only, CORS-open):
 
 | Method | Path | Reply |
 | ------ | ---- | ----- |
-| GET | `/catalog` | `[{"id","title","titleId","version","size","sizeText","role","familyKey","platform","hasIcon"}]` (`role` = Game/Patch/DLC) |
+| GET | `/catalog` | `[{"id","title","titleId","version","size","sizeText","role","familyKey","platform","format","file","hasIcon"}]` (`role` = Game/Patch/DLC/Image) |
 | GET | `/icon/{id}` | cover PNG (`image/png`) |
 | GET | `/pkg/{id}` | PKG bytes (range-capable, same as pushes use) |
 
