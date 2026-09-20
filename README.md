@@ -99,6 +99,34 @@ under `/data/homebrew`. This API is not stable and may change between versions.
 Discovery: the receiver broadcasts `PKGSENDER v1` to UDP `255.255.255.255:12801`
 every 3 seconds.
 
+## Console library (pkg remote installer)
+
+Browse and install the scanned PC library from the console's own browser —
+no need to walk back to the PC:
+
+1. In PKG Sender, scan your folders, then tick **Publish library**. The status
+   bar shows the catalog URL (`http://<pc-ip>:9898/catalog`).
+2. On first run the receiver installs a **pkg remote installer** shortcut on
+   the PS5 home screen (Media category, `PKGS12800`). Open it — or browse to
+   `http://<console-ip>:12800/` manually.
+3. **Library tab**: enter the PC address once (remembered in the browser),
+   pick a game by its cover, press Install. **Manual URL tab** keeps the old
+   paste-a-link form as fallback.
+
+Published endpoints on the PC file server (`:9898`, PKG only, CORS-open):
+
+| Method | Path | Reply |
+| ------ | ---- | ----- |
+| GET | `/catalog` | `[{"id","title","titleId","version","size","hasIcon"}]` |
+| GET | `/icon/{id}` | cover PNG (`image/png`) |
+| GET | `/pkg/{id}` | PKG bytes (range-capable, same as pushes use) |
+
+## Credits
+
+- [ps5-web-file-manager](https://github.com/owendswang/ps5-web-file-manager)
+  (GPL-3.0) — the home-screen web-shortcut launcher idea; reimplemented here,
+  no code copied.
+
 Example (check, upload one chunk at offset 0, finalize):
 
 ```sh

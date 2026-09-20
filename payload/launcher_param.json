@@ -1,0 +1,11 @@
+{
+  "applicationCategoryType": 65536,
+  "titleId": "PKGS12800",
+  "deeplinkUri": "http://127.0.0.1:12800/",
+  "localizedParameters": {
+    "defaultLanguage": "en-US",
+    "en-US": {
+      "titleName": "pkg remote installer"
+    }
+  }
+}

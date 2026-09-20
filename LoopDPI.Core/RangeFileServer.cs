@@ -188,7 +188,7 @@ public sealed class RangeFileServer : IDisposable
                 {
                 }
                 var jb = Encoding.UTF8.GetBytes(json);
-                await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nContent-Length: {jb.Length}\r\nConnection: close\r\n\r\n", ct);
+                await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {jb.Length}\r\nConnection: close\r\n\r\n", ct);
                 if (!isHead)
                 {
                     try
@@ -212,7 +212,7 @@ public sealed class RangeFileServer : IDisposable
                     return;
                 }
                 FileRequested?.Invoke(iconId);
-                await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: image/png\r\nContent-Length: {png.Length}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n", ct);
+                await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: image/png\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {png.Length}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n", ct);
                 if (!isHead)
                 {
                     try

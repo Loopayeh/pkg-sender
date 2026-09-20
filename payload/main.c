@@ -3,7 +3,9 @@
  * No etaHEN, no arsenal. Chain: jailbreak -> kstuff -> pkg-receiver.elf
  *
  * Listens on TCP 12800 (INADDR_ANY, LAN-reachable):
- *   GET  /              - tiny WebUI, paste a PKG URL and install
+ *   GET  /              - WebUI: Library tab (PC catalog + covers) and
+ *                          Manual URL tab; installs a home-screen launcher
+ *                          ("pkg remote installer", PKGS12800) on startup
  *   GET  /api            - probe (open, no action)
  *   GET  /api/status     - {"busy":true/false,"active":N} install state
  *   GET  /install?url=   - install by query arg
@@ -164,6 +166,118 @@ installer_init(void)
 	pthread_mutex_unlock(&g_inst_lock);
 	return rc;
 }
+
+/* ── Home-screen launcher ("pkg remote installer", Media category) ────
+ * Same idea as owendswang's ps5-web-file-manager (reimplemented here):
+ * write /user/app/PKGS12800/sce_sys/{param.json,icon0.png} once, then
+ * register the web shortcut via AppInstUtil. Best-effort: if the symbol
+ * is missing the receiver keeps serving without a launcher.
+ * Skipped entirely in TEST_ONLY builds. */
+#ifndef TEST_ONLY
+#define LAUNCHER_TID "PKGS12800"
+
+__asm__(
+".section .rodata\n"
+".global launcher_param\n"
+".global launcher_param_end\n"
+".global launcher_param_size\n"
+".align 16\n"
+"launcher_param:\n"
+".incbin \"launcher_param.json\"\n"
+"launcher_param_end:\n"
+"launcher_param_size:\n"
+".quad launcher_param_end - launcher_param\n"
+".previous\n");
+extern const unsigned char launcher_param[];
+extern const size_t launcher_param_size;
+
+__asm__(
+".section .rodata\n"
+".global launcher_icon\n"
+".global launcher_icon_end\n"
+".global launcher_icon_size\n"
+".align 16\n"
+"launcher_icon:\n"
+".incbin \"icon0.png\"\n"
+"launcher_icon_end:\n"
+"launcher_icon_size:\n"
+".quad launcher_icon_end - launcher_icon\n"
+".previous\n");
+extern const unsigned char launcher_icon[];
+extern const size_t launcher_icon_size;
+
+typedef int (*titledir_fn)(const char *, const char *, void *);
+
+static int
+write_file_once(const char *path, const unsigned char *data, size_t size)
+{
+	struct stat st;
+	FILE *f;
+
+	if (stat(path, &st) == 0)
+		return 0;
+	if (errno != ENOENT)
+		return -1;
+	f = fopen(path, "wb");
+	if (!f)
+		return -1;
+	if (fwrite(data, size, 1, f) != 1) {
+		fclose(f);
+		return -1;
+	}
+	fclose(f);
+	return 0;
+}
+
+static void
+launcher_install_if_needed(void)
+{
+	char dir[128], sdir[160], pj[192], ip[192];
+	char toast[96];
+	struct stat st;
+	titledir_fn p_titledir;
+	int rc;
+
+	snprintf(dir, sizeof(dir), "/user/app/%s", LAUNCHER_TID);
+	if (stat(dir, &st) == 0) {
+		snprintf(pj, sizeof(pj), "%s/sce_sys/param.json", dir);
+		snprintf(ip, sizeof(ip), "%s/sce_sys/icon0.png", dir);
+		if (stat(pj, &st) == 0 && stat(ip, &st) == 0)
+			return; /* already installed */
+	}
+	if (installer_init() != 0) {
+		notify_user("Loopayeh: launcher skipped (AppInstUtil off)");
+		return;
+	}
+	snprintf(sdir, sizeof(sdir), "%s/sce_sys", dir);
+	if ((mkdir(dir, 0755) != 0 && errno != EEXIST) ||
+	    (mkdir(sdir, 0755) != 0 && errno != EEXIST)) {
+		notify_user("Loopayeh: launcher mkdir failed");
+		return;
+	}
+	snprintf(pj, sizeof(pj), "%s/param.json", sdir);
+	snprintf(ip, sizeof(ip), "%s/icon0.png", sdir);
+	if (write_file_once(pj, launcher_param, launcher_param_size) != 0 ||
+	    write_file_once(ip, launcher_icon, launcher_icon_size) != 0) {
+		notify_user("Loopayeh: launcher file write failed");
+		return;
+	}
+	p_titledir = (titledir_fn)dlsym(g_applib,
+	    "sceAppInstUtilAppInstallTitleDir");
+	if (!p_titledir) {
+		notify_user("Loopayeh: launcher staged, registration N/A");
+		return;
+	}
+	rc = p_titledir(LAUNCHER_TID, "/user/app/", NULL);
+	if (rc == 0)
+		notify_user("Loopayeh: home launcher installed");
+	else {
+		snprintf(toast, sizeof(toast),
+		    "Loopayeh: launcher register 0x%08X", (unsigned)rc);
+		notify_user(toast);
+	}
+}
+#endif /* TEST_ONLY */
 
 /* install runs on a detached worker so a slow/hanging SCE call can
  * never wedge the single-threaded HTTP loop. */
@@ -614,23 +728,64 @@ static const char UI_HTML[] =
 #else
 "<!DOCTYPE html><html><head><meta charset=utf-8>"
 "<meta name=viewport content='width=device-width,initial-scale=1'>"
-"<title>PKG Sender</title>"
-"<style>body{background:#101418;color:#eee;font-family:sans-serif;display:flex;"
-"flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0}"
-"h2{color:#7fd4ff;margin-bottom:20px}form{display:flex;flex-direction:column;gap:12px;width:90%;max-width:520px}"
-"input{padding:12px;border:1px solid #7fd4ff;border-radius:6px;background:#0b0e12;color:#eee;font-size:15px}"
-"button{padding:12px;background:#7fd4ff;border:none;border-radius:6px;color:#101418;"
-"font-size:16px;font-weight:bold}button{cursor:pointer}"
-"#st{margin-top:14px;font-size:14px;min-height:20px}</style></head><body>"
-"<h2>PKG Sender - PS5 Receiver</h2>"
-"<form id=f><input id=url type=url placeholder='http://192.168.x.x:9898/game.pkg' required>"
-"<button type=submit>Install PKG</button></form><div id=st></div>"
-"<script>document.getElementById('f').onsubmit=async function(e){e.preventDefault();"
+"<title>pkg remote installer</title>"
+"<style>body{background:#101418;color:#eee;font-family:sans-serif;margin:0;padding:16px}"
+"h2{color:#7fd4ff;margin:0 0 12px}#tabs{display:flex;gap:8px;margin-bottom:14px}"
+"#tabs button{flex:1;padding:12px;background:#1c232c;border:1px solid #7fd4ff;border-radius:6px;color:#7fd4ff;font-size:16px;font-weight:bold;cursor:pointer}"
+"#tabs button.on{background:#7fd4ff;color:#101418}"
+"#cfg{display:flex;gap:8px;margin-bottom:12px}"
+"input{flex:1;padding:12px;border:1px solid #7fd4ff;border-radius:6px;background:#0b0e12;color:#eee;font-size:15px}"
+"button.go{padding:12px;background:#7fd4ff;border:none;border-radius:6px;color:#101418;font-size:15px;font-weight:bold;cursor:pointer}"
+"#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}"
+".card{background:#1c232c;border-radius:8px;padding:10px;text-align:center}"
+".card img{width:100%;height:120px;object-fit:contain;background:#0b0e12;border-radius:6px}"
+".card .t{font-size:13px;margin:8px 0 2px;min-height:32px}"
+".card .m{font-size:11px;color:#8B93A5;margin-bottom:8px}"
+".card button{width:100%;padding:10px;background:#7fd4ff;border:none;border-radius:6px;color:#101418;font-weight:bold;cursor:pointer}"
+"#msg{margin-top:14px;font-size:14px;min-height:20px}"
+"form#mf{display:flex;flex-direction:column;gap:12px;width:90%;max-width:520px;margin:0 auto}</style></head><body>"
+"<h2>pkg remote installer</h2>"
+"<div id=tabs><button id=tabL class=on>Library</button><button id=tabM>Manual URL</button></div>"
+"<div id=lib><div id=cfg><input id=pc placeholder='PC address (e.g. 192.168.1.5)'>"
+"<button class=go id=save>Save &amp; load</button></div><div id=grid></div><div id=msg></div></div>"
+"<div id=man style='display:none'><form id=mf><input id=url type=url placeholder='http://192.168.x.x:9898/game.pkg' required>"
+"<button class=go type=submit>Install PKG</button></form><div id=st style='text-align:center'></div></div>"
+"<script>(function(){var pcEl=document.getElementById('pc');"
+"var grid=document.getElementById('grid');var msg=document.getElementById('msg');"
+"pcEl.value=localStorage.getItem('pri_pc')||'';"
+"function show(which){document.getElementById('lib').style.display=which?'':'none';"
+"document.getElementById('man').style.display=which?'none':'';"
+"document.getElementById('tabL').className=which?'on':'';"
+"document.getElementById('tabM').className=which?'':'on';}"
+"document.getElementById('tabL').onclick=function(){show(1);};"
+"document.getElementById('tabM').onclick=function(){show(0);};"
+"function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}"
+"async function install(id,name){msg.textContent='Installing '+name+'...';"
+"try{var u='http://'+pcEl.value+':9898/pkg/'+encodeURIComponent(id);"
+"var r=await fetch('/install?url='+encodeURIComponent(u));"
+"msg.textContent=await r.text();}catch(ex){msg.textContent='Error: '+ex;}}"
+"async function load(){var pc=pcEl.value.trim();"
+"if(!pc){msg.textContent='Enter the PC address first (PKG Sender shows it when Publish library is on).';return;}"
+"localStorage.setItem('pri_pc',pc);msg.textContent='Loading...';grid.innerHTML='';"
+"try{var r=await fetch('http://'+pc+':9898/catalog');"
+"var list=await r.json();"
+"if(!list.length){msg.textContent='Library is empty — tick Publish library in PKG Sender.';return;}"
+"msg.textContent=list.length+' games';"
+"list.forEach(function(g){var d=document.createElement('div');d.className='card';"
+"var im=g.hasIcon?'<img src=\"http://'+pc+':9898/icon/'+encodeURIComponent(g.id)+'\">':'';"
+"var meta=esc(g.titleId||'');if(g.version)meta+=' v'+esc(g.version);"
+"d.innerHTML=im+'<div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div>';"
+"var b=document.createElement('button');b.textContent='Install';"
+"b.onclick=function(){install(g.id,g.title);};d.appendChild(b);grid.appendChild(d);});}"
+"catch(ex){msg.textContent='Error: '+ex+' — is Publish library on and the PC reachable?';}}"
+"document.getElementById('save').onclick=load;"
+"document.getElementById('mf').onsubmit=async function(e){e.preventDefault();"
 "var u=document.getElementById('url').value;"
 "document.getElementById('st').textContent='Installing...';"
 "try{var r=await fetch('/install?url='+encodeURIComponent(u));"
 "var x=await r.text();document.getElementById('st').textContent=x;}"
-"catch(ex){document.getElementById('st').textContent='Error: '+ex;}}</script>"
+"catch(ex){document.getElementById('st').textContent='Error: '+ex;}};"
+"if(pcEl.value)load();})();</script>"
 "</body></html>";
 #endif
 
@@ -1002,6 +1157,10 @@ main(void)
 	    );
 
 	beacon_start();
+
+#ifndef TEST_ONLY
+	launcher_install_if_needed();
+#endif
 
 	for (;;) {
 		cl = accept(srv, NULL, NULL);
