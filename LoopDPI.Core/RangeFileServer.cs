@@ -126,6 +126,16 @@ public sealed class RangeFileServer : IDisposable
 
     private async Task Handle(TcpClient cl, CancellationToken ct)
     {
+        // Bulk-send tuning: big kernel send buffer so the PS5 can pull at
+        // line rate instead of a few MB/s (same class of fix as zftpd's).
+        try
+        {
+            cl.SendBufferSize = 1024 * 1024;
+            cl.NoDelay = true;
+        }
+        catch
+        {
+        }
         using (cl)
         using (var ns = cl.GetStream())
         {
@@ -333,7 +343,7 @@ public sealed class RangeFileServer : IDisposable
             {
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 fs.Seek(start, SeekOrigin.Begin);
-                var buf = new byte[1024 * 256];
+                var buf = new byte[1024 * 1024];
                 while (length > 0 && !ct.IsCancellationRequested)
                 {
                     int want = (int)Math.Min(buf.Length, length);

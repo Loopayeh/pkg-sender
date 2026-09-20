@@ -137,6 +137,9 @@ Published endpoints on the PC file server (`:9898`, PKG only, CORS-open):
 - [ps5-web-file-manager](https://github.com/owendswang/ps5-web-file-manager)
   (GPL-3.0) — the home-screen web-shortcut launcher idea; reimplemented here,
   no code copied.
+- [seregonwar/zftpd](https://github.com/seregonwar/zftpd) (MIT) — pointed at
+  PS5 TCP socket-buffer tuning as the fix for slow bulk transfers; our
+  pull-downloader buffering was rewritten from scratch, no code copied.
 
 Example (check, upload one chunk at offset 0, finalize):
 

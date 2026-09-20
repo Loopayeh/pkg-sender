@@ -1048,8 +1048,8 @@ pull_download(const char *url, const char *local)
 	char portstr[16] = "80";
 	struct addrinfo hints, *res = NULL, *rp;
 	int s = -1, out = -1;
-	char hb[8192];
 	ssize_t n;
+#define PULL_CHUNK (64 * 1024)
 	long long want = -1, got = 0;
 	struct stat st;
 
@@ -1081,13 +1081,17 @@ pull_download(const char *url, const char *local)
 	if (s < 0)
 		return -1;
 	/* a stalled tunnel must fail loudly, never hang the worker forever */
+	/* big receive buffer: the PS5 default is tiny and throttles bulk
+	 * downloads to a few MB/s (same class of fix as zftpd's tuning). */
 	{
 		struct timeval tv;
+		int rcv = 1024 * 1024;
 
 		tv.tv_sec = 30;
 		tv.tv_usec = 0;
 		setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 		setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+		setsockopt(s, SOL_SOCKET, SO_RCVBUF, &rcv, sizeof(rcv));
 	}
 	snprintf(req, sizeof(req),
 	    "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
@@ -1099,14 +1103,15 @@ pull_download(const char *url, const char *local)
 	/* read headers, find Content-Length */
 	{
 		char hs[4096];
+		char c;
 		size_t hl = 0;
 		for (;;) {
-			n = recv(s, hb, 1, 0);
+			n = recv(s, &c, 1, 0);
 			if (n <= 0)
 				break;
 			if (hl + 1 >= sizeof(hs))
 				break;
-			hs[hl++] = hb[0];
+			hs[hl++] = c;
 			hs[hl] = '\0';
 			if (hl >= 4 && !strcmp(hs + hl - 4, "\r\n\r\n"))
 				break;
@@ -1151,19 +1156,30 @@ pull_download(const char *url, const char *local)
 	}
 	g_pull_want = want;
 	g_pull_got = 0;
-	for (;;) {
-		n = recv(s, hb, sizeof(hb), 0);
-		if (n < 0) {
-			if (errno == EINTR)
-				continue;
-			break;
+	/* heap, not stack: 64K would risk the worker thread's stack */
+	{
+		char *hb = malloc(PULL_CHUNK);
+
+		if (!hb) {
+			close(s);
+			close(out);
+			return -1;
 		}
-		if (n == 0)
-			break;
-		if (write(out, hb, (size_t)n) != n)
-			break;
-		got += n;
-		g_pull_got = got;
+		for (;;) {
+			n = recv(s, hb, PULL_CHUNK, 0);
+			if (n < 0) {
+				if (errno == EINTR)
+					continue;
+				break;
+			}
+			if (n == 0)
+				break;
+			if (write(out, hb, (size_t)n) != n)
+				break;
+			got += n;
+			g_pull_got = got;
+		}
+		free(hb);
 	}
 	close(s);
 	close(out);
