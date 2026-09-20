@@ -5,9 +5,11 @@ using System.Threading.Tasks;
 
 namespace LoopDPI.Core;
 
-/// <summary>Minimal RPI-compatible client for LoopDPI on the PS5 (port 12800).</summary>
+/// <summary>Minimal RPI-compatible client for LoopDPI on the PS5 (port 12800, PS4 fallback 9090).</summary>
 public static class ConsoleClient
 {
+    private static readonly int[] Ports = { 12800, 9090 };
+
     private static HttpClient NewClient(int seconds = 15)
     {
         var h = new HttpClientHandler { UseProxy = false };
@@ -15,62 +17,78 @@ public static class ConsoleClient
         return c;
     }
 
+    /// <summary>GET path from the first reachable port (12800, then 9090). Null if none.</summary>
+    private static async Task<string?> GetAnyAsync(string psIp, string path, int seconds = 15)
+    {
+        foreach (int p in Ports)
+        {
+            try
+            {
+                using var c = NewClient(seconds);
+                return await c.GetStringAsync($"http://{psIp}:{p}{path}");
+            }
+            catch
+            {
+            }
+        }
+        return null;
+    }
+
+    /// <summary>POST json to the first port that answers 2xx. Returns body or null.</summary>
+    private static async Task<string?> PostAnyAsync(string psIp, string path, string json, int seconds = 15)
+    {
+        foreach (int p in Ports)
+        {
+            try
+            {
+                using var c = NewClient(seconds);
+                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                using var resp = await c.PostAsync($"http://{psIp}:{p}{path}", content);
+                string body = await resp.Content.ReadAsStringAsync();
+                if (resp.IsSuccessStatusCode)
+                    return body;
+            }
+            catch
+            {
+            }
+        }
+        return null;
+    }
+
     public static async Task<bool> IsOnlineAsync(string psIp)
     {
-        try
-        {
-            using var c = NewClient(3);
-            var body = await c.GetStringAsync($"http://{psIp}:12800/api");
-            return body.Contains("Unsupported method") && body.Contains("fail");
-        }
-        catch
-        {
-            return false;
-        }
+        string? body = await GetAnyAsync(psIp, "/api", 3);
+        return body != null && body.Contains("Unsupported method") && body.Contains("fail");
     }
 
     public static async Task<(bool Ok, string Reply)> PushAsync(string psIp, string url, string? name = null, string? iconUrl = null)
     {
-        try
+        // LoopDPI + RPI both accept this shape; URL travels encoded.
+        string enc = Uri.EscapeDataString(url.Replace("https://", "http://"));
+        string json = $"{{\"type\":\"direct\",\"packages\":[\"{enc}\"]}}";
+        if (!string.IsNullOrWhiteSpace(name))
+            json = $"{{\"type\":\"direct\",\"packages\":[\"{enc}\"],\"name\":\"{JsonEscape(name)}\"}}";
+        if (!string.IsNullOrWhiteSpace(iconUrl))
         {
-            using var c = NewClient();
-            // LoopDPI + RPI both accept this shape; URL travels encoded.
-            string enc = Uri.EscapeDataString(url.Replace("https://", "http://"));
-            string json = $"{{\"type\":\"direct\",\"packages\":[\"{enc}\"]}}";
-            if (!string.IsNullOrWhiteSpace(name))
-                json = $"{{\"type\":\"direct\",\"packages\":[\"{enc}\"],\"name\":\"{JsonEscape(name)}\"}}";
-            if (!string.IsNullOrWhiteSpace(iconUrl))
-            {
-                // Insert icon_url before the closing brace.
-                json = json[..^1] + $",\"icon_url\":\"{JsonEscape(iconUrl)}\"}}";
-            }
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
-            using var resp = await c.PostAsync($"http://{psIp}:12800/api/install", content);
-            string body = await resp.Content.ReadAsStringAsync();
-            return (body.Contains("\"success\""), body);
+            // Insert icon_url before the closing brace.
+            json = json[..^1] + $",\"icon_url\":\"{JsonEscape(iconUrl)}\"}}";
         }
-        catch (Exception ex)
-        {
-            return (false, ex.Message);
-        }
+        string? body = await PostAnyAsync(psIp, "/api/install", json);
+        if (body == null)
+            return (false, "no reply on 12800/9090");
+        return (body.Contains("\"success\""), body);
     }
 
     public static async Task<(bool Supported, bool Busy)> GetStatusAsync(string psIp)
     {
-        try
-        {
-            using var c = NewClient(10);
-            string body = await c.GetStringAsync($"http://{psIp}:12800/api/status");
-            // New payload: {"busy":true,"active":1}. Old ones answer the
-            // WebUI HTML here -> no "busy" key -> unsupported.
-            if (!body.Contains("busy"))
-                return (false, false);
-            return (true, body.Contains("\"busy\":true"));
-        }
-        catch
-        {
+        string? body = await GetAnyAsync(psIp, "/api/status", 10);
+        if (body == null)
             return (false, false);
-        }
+        // New payload: {"busy":true,"active":1}. Old ones answer the
+        // WebUI HTML here -> no "busy" key -> unsupported.
+        if (!body.Contains("busy"))
+            return (false, false);
+        return (true, body.Contains("\"busy\":true"));
     }
 
     /// <summary>
@@ -81,19 +99,11 @@ public static class ConsoleClient
     /// </summary>
     public static async Task<(bool Ok, string Reply)> PullAsync(string psIp, string url, string remotePath, bool resume = false)
     {
-        try
-        {
-            using var c = NewClient();
-            string json = $"{{\"url\":\"{JsonEscape(url)}\",\"path\":\"{JsonEscape(remotePath)}\",\"mode\":\"{(resume ? "resume" : "overwrite")}\"}}";
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
-            using var resp = await c.PostAsync($"http://{psIp}:12800/api/files/pull", content);
-            string body = await resp.Content.ReadAsStringAsync();
-            return (body.Contains("started") || body.Contains("\"ok\""), body);
-        }
-        catch (Exception ex)
-        {
-            return (false, ex.Message);
-        }
+        string json = $"{{\"url\":\"{JsonEscape(url)}\",\"path\":\"{JsonEscape(remotePath)}\",\"mode\":\"{(resume ? "resume" : "overwrite")}\"}}";
+        string? body = await PostAnyAsync(psIp, "/api/files/pull", json);
+        if (body == null)
+            return (false, "no reply on 12800/9090");
+        return (body.Contains("started") || body.Contains("\"ok\""), body);
     }
 
     /// <summary>
@@ -101,39 +111,23 @@ public static class ConsoleClient
     /// </summary>
     public static async Task<(bool Active, string Name, long Got, long Want, bool Paused)> GetPullAsync(string psIp)
     {
-        try
-        {
-            using var c = NewClient(10);
-            string body = await c.GetStringAsync($"http://{psIp}:12800/api/status");
-            bool active = body.Contains("\"pull\":true");
-            string name = StrField(body, "pullName");
-            long got = LongField(body, "pullGot");
-            long want = LongField(body, "pullWant");
-            bool paused = body.Contains("\"pullPaused\":true");
-            return (active, name, got, want, paused);
-        }
-        catch
-        {
+        string? body = await GetAnyAsync(psIp, "/api/status", 10);
+        if (body == null)
             return (false, "", 0, -1, false);
-        }
+        bool active = body.Contains("\"pull\":true");
+        string name = StrField(body, "pullName");
+        long got = LongField(body, "pullGot");
+        long want = LongField(body, "pullWant");
+        bool paused = body.Contains("\"pullPaused\":true");
+        return (active, name, got, want, paused);
     }
 
     /// <summary>Pause/unpause the receiver's running pull copy.</summary>
     public static async Task<bool> PullPauseAsync(string psIp, bool paused)
     {
-        try
-        {
-            using var c = NewClient(10);
-            string json = $"{{\"paused\":{(paused ? 1 : 0)}}}";
-            using var content = new StringContent(json, Encoding.UTF8, "application/json");
-            using var resp = await c.PostAsync($"http://{psIp}:12800/api/pull/pause", content);
-            string body = await resp.Content.ReadAsStringAsync();
-            return body.Contains("\"ok\"");
-        }
-        catch
-        {
-            return false;
-        }
+        string json = $"{{\"paused\":{(paused ? 1 : 0)}}}";
+        string? body = await PostAnyAsync(psIp, "/api/pull/pause", json, 10);
+        return body != null && body.Contains("\"ok\"");
     }
 
     private static string StrField(string body, string key)
@@ -179,17 +173,11 @@ public static class ConsoleClient
     /// </summary>
     public static async Task<(bool Exists, long Size)> StatAsync(string psIp, string remotePath)
     {
-        try
-        {
-            using var c = NewClient(10);
-            string body = await c.GetStringAsync(
-                $"http://{psIp}:12800/api/files/stat?path={Uri.EscapeDataString(remotePath)}");
-            return (body.Contains("\"exists\":true"), LongField(body, "size"));
-        }
-        catch
-        {
+        string? body = await GetAnyAsync(psIp,
+            "/api/files/stat?path=" + Uri.EscapeDataString(remotePath), 10);
+        if (body == null)
             return (false, -1);
-        }
+        return (body.Contains("\"exists\":true"), LongField(body, "size"));
     }
     private static string JsonEscape(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -15,11 +16,13 @@ namespace LoopDPI.Core;
 public sealed class ReceiverClient : IDisposable
 {
     private readonly HttpClient _http;
-    private readonly string _base;
+    private readonly string[] _bases;
+    private string _sticky;
 
     public ReceiverClient(string psIp, int timeoutSeconds = 0)
     {
-        _base = $"http://{psIp}:12800";
+        _bases = new[] { $"http://{psIp}:12800", $"http://{psIp}:9090" };
+        _sticky = _bases[0];
         var h = new HttpClientHandler { UseProxy = false };
         _http = new HttpClient(h);
         if (timeoutSeconds > 0)
@@ -28,16 +31,28 @@ public sealed class ReceiverClient : IDisposable
             _http.Timeout = Timeout.InfiniteTimeSpan;
     }
 
-    private HttpRequestMessage NewRequest(HttpMethod method, string path) =>
-        new HttpRequestMessage(method, _base + path);
+    private HttpRequestMessage NewRequest(HttpMethod method, string baseUrl, string path) =>
+        new HttpRequestMessage(method, baseUrl + path);
+
+    /// <summary>Try the last-working port first, fall back to the other.</summary>
+    private IEnumerable<string> Ordered()
+    {
+        yield return _sticky;
+        foreach (var b in _bases)
+            if (b != _sticky)
+                yield return b;
+    }
 
     private static string Q(string remotePath) => "?path=" + Uri.EscapeDataString(remotePath);
 
     public async Task<(bool Ok, bool Exists, long Size, string Reply)> StatAsync(string remotePath, CancellationToken ct = default)
     {
+        string lastErr = "";
+        foreach (var b in Ordered())
+        {
         try
         {
-            using var req = NewRequest(HttpMethod.Get, "/api/files/stat" + Q(remotePath));
+            using var req = NewRequest(HttpMethod.Get, b, "/api/files/stat" + Q(remotePath));
             using var resp = await _http.SendAsync(req, ct);
             string body = await resp.Content.ReadAsStringAsync(ct);
             if (!resp.IsSuccessStatusCode)
@@ -48,6 +63,7 @@ public sealed class ReceiverClient : IDisposable
                 var root = doc.RootElement;
                 bool exists = root.TryGetProperty("exists", out var e) && e.GetBoolean();
                 long size = root.TryGetProperty("size", out var s) && s.TryGetInt64(out var v) ? v : 0;
+                _sticky = b;
                 return (true, exists, size, body);
             }
             catch
@@ -57,61 +73,93 @@ public sealed class ReceiverClient : IDisposable
         }
         catch (Exception ex)
         {
-            return (false, false, 0, ex.Message);
+            lastErr = ex.Message;
         }
+        }
+        return (false, false, 0, lastErr);
     }
 
     public async Task<(bool Ok, string Reply)> MkdirAsync(string remotePath, CancellationToken ct = default)
     {
+        string lastErr = "";
+        foreach (var b in Ordered())
+        {
         try
         {
             string json = "{\"path\":\"" + JsonEscape(remotePath) + "\"}";
-            using var req = NewRequest(HttpMethod.Post, "/api/files/mkdir");
+            using var req = NewRequest(HttpMethod.Post, b, "/api/files/mkdir");
             req.Content = new StringContent(json, Encoding.UTF8, "application/json");
             using var resp = await _http.SendAsync(req, ct);
             string body = await resp.Content.ReadAsStringAsync(ct);
-            return (resp.IsSuccessStatusCode, body);
+            if (resp.IsSuccessStatusCode)
+            {
+                _sticky = b;
+                return (true, body);
+            }
+            lastErr = body;
         }
         catch (Exception ex)
         {
-            return (false, ex.Message);
+            lastErr = ex.Message;
         }
+        }
+        return (false, lastErr);
     }
 
     public async Task<(bool Ok, string Reply)> WriteChunkAsync(
         string remotePath, long offset, byte[] buf, int count, CancellationToken ct = default)
     {
+        string lastErr = "";
+        foreach (var b in Ordered())
+        {
         try
         {
-            using var req = NewRequest(HttpMethod.Post,
+            using var req = NewRequest(HttpMethod.Post, b,
                 "/api/files/write" + Q(remotePath) + "&offset=" + offset);
             req.Content = new ByteArrayContent(buf, 0, count);
             req.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             string body = await resp.Content.ReadAsStringAsync(ct);
-            return (resp.IsSuccessStatusCode, body);
+            if (resp.IsSuccessStatusCode)
+            {
+                _sticky = b;
+                return (true, body);
+            }
+            lastErr = body;
         }
         catch (Exception ex)
         {
-            return (false, ex.Message);
+            lastErr = ex.Message;
         }
+        }
+        return (false, lastErr);
     }
 
     public async Task<(bool Ok, string Reply)> DoneAsync(string remotePath, long size, CancellationToken ct = default)
     {
+        string lastErr = "";
+        foreach (var b in Ordered())
+        {
         try
         {
             string json = "{\"path\":\"" + JsonEscape(remotePath) + "\",\"size\":" + size + "}";
-            using var req = NewRequest(HttpMethod.Post, "/api/files/done");
+            using var req = NewRequest(HttpMethod.Post, b, "/api/files/done");
             req.Content = new StringContent(json, Encoding.UTF8, "application/json");
             using var resp = await _http.SendAsync(req, ct);
             string body = await resp.Content.ReadAsStringAsync(ct);
-            return (resp.IsSuccessStatusCode, body);
+            if (resp.IsSuccessStatusCode)
+            {
+                _sticky = b;
+                return (true, body);
+            }
+            lastErr = body;
         }
         catch (Exception ex)
         {
-            return (false, ex.Message);
+            lastErr = ex.Message;
         }
+        }
+        return (false, lastErr);
     }
 
     private static string JsonEscape(string s) =>

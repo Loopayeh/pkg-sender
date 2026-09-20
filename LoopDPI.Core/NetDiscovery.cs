@@ -281,7 +281,9 @@ public static class NetDiscovery
                     try
                     {
                         if (ct.IsCancellationRequested) return;
-                        if (!await TcpOpenAsync(host, ReceiverPort, 300, ct).ConfigureAwait(false)) return;
+                        bool open12800 = await TcpOpenAsync(host, ReceiverPort, 300, ct).ConfigureAwait(false);
+                        bool open9090 = !open12800 && await TcpOpenAsync(host, 9090, 300, ct).ConfigureAwait(false);
+                        if (!open12800 && !open9090) return;
                         var (apiOk, busy) = await ProbeAsync(ip).ConfigureAwait(false);
                         if (apiOk)
                             results[ip] = new ConsoleFound(ip, busy, "sweep");
