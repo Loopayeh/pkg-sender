@@ -885,9 +885,16 @@ static const char UI_HTML[] =
 "try{var u='http://'+pcEl.value+':9898/pkg/'+encodeURIComponent(id);"
 "var r=await fetch('/install?url='+encodeURIComponent(u));"
 "msg.textContent=await r.text();}catch(ex){msg.textContent='Error: '+ex;}}"
-"async function copyImg(id,file){msg.textContent='Copying '+file+'...';"
+"async function copyImg(id,file,size){msg.textContent='Copying '+file+'...';"
+"var mode='overwrite';"
+"try{var st=await fetch('/api/files/stat?path='+encodeURIComponent('/data/homebrew/'+file));"
+"var sj=await st.json();"
+"if(sj.exists&&size>0&&sj.size===size){msg.textContent=file+' is already there.';return;}"
+"if(sj.exists&&sj.size>0&&sj.size<size)"
+"mode=confirm('Partial copy on console ('+fmtSize(sj.size)+' of '+fmtSize(size)+'). OK = Resume, Cancel = Overwrite from zero.')?'resume':'overwrite';}"
+"catch(ex){}"
 "try{var r=await fetch('/api/files/pull',{method:'POST',headers:{'Content-Type':'application/json'},"
-"body:JSON.stringify({url:'http://'+pcEl.value+':9898/pkg/'+id,path:'/data/homebrew/'+file})});"
+"body:JSON.stringify({url:'http://'+pcEl.value+':9898/pkg/'+id,path:'/data/homebrew/'+file,mode:mode})});"
 "var x=await r.text();"
 "if(x.indexOf('started')<0){msg.textContent=x;return;}"
 "var lastGot=0,lastT=Date.now();"
@@ -917,7 +924,7 @@ static const char UI_HTML[] =
 "if(kind==='images'){"
 "d.innerHTML='<div class=big>'+imgIcon(g.format)+'</div><div class=t>'+esc(g.title)+'</div><div class=m>'+esc(g.format)+' &middot; '+esc(g.sizeText||'')+'</div>';"
 "var cb=document.createElement('button');cb.textContent='Copy to homebrew';"
-"cb.onclick=function(ev){ev.stopPropagation();copyImg(g.id,g.file||g.title);};d.appendChild(cb);return d;}"
+"cb.onclick=function(ev){ev.stopPropagation();copyImg(g.id,g.file||g.title,g.size||0);};d.appendChild(cb);return d;}"
 "var fam=all.filter(function(m){return m.format==='pkg'&&!isBase(m)&&m.familyKey===g.familyKey;});"
 "fam.sort(function(a,b){return rank(a.role)-rank(b.role);});"
 "var cnt=fam.length?'<span class=fc>'+fam.length+' add-on'+(fam.length>1?'s':'')+'</span>':'';"
@@ -1036,6 +1043,7 @@ do_install_reply_text(int fd, const char *url, const char *name,
 typedef struct pull_job {
 	char url[URL_MAX];
 	char local[PATH_MAX_V];
+	int resume;
 } pull_job_t;
 
 /* pull progress, visible in GET /api/status while a copy runs */
@@ -1228,9 +1236,10 @@ pull_seg_worker(void *arg)
 	return NULL;
 }
 
-/* 0 = ok, 1 = skipped (same size present), -1 = error */
+/* 0 = ok, 1 = skipped (same size present), -1 = error
+ * resume = continue a partial local file instead of starting over. */
 static int
-pull_download(const char *url, const char *local)
+pull_download(const char *url, const char *local, int resume)
 {
 	const char *p = url + 7; /* skip http:// */
 	const char *slash = strchr(p, '/');
@@ -1238,7 +1247,7 @@ pull_download(const char *url, const char *local)
 	char portstr[16] = "80";
 	int s = -1, out = -1;
 	ssize_t n;
-	long long want = -1, got = 0;
+	long long want = -1, got = 0, have = -1, base = 0;
 	struct stat st;
 
 	if (!slash || (size_t)(slash - p) >= sizeof(host))
@@ -1272,6 +1281,9 @@ pull_download(const char *url, const char *local)
 	if (want >= 0 && stat(local, &st) == 0 &&
 	    (long long)st.st_size == want)
 		return 1; /* already there */
+	/* resume point: existing partial bytes are kept, segments cover the rest */
+	have = (want >= 0 && stat(local, &st) == 0) ? (long long)st.st_size : -1;
+	base = (resume && want > 0 && have > 0 && have < want) ? have : 0;
 	/* /data/homebrew may not exist yet — create the parent chain first */
 	{
 		char dir[PATH_MAX_V], *slash;
@@ -1285,14 +1297,14 @@ pull_download(const char *url, const char *local)
 		}
 	}
 	g_pull_want = want;
-	g_pull_got = 0;
+	g_pull_got = base;
 	if (want >= 2 * 1024 * 1024) {
 		/* ── fast path: PULL_SEGS parallel Range streams ──
 		 * heap, not stack: worker threads have small stacks. */
 		pull_seg_t *segs = malloc(sizeof(*segs) * PULL_SEGS);
 		pthread_t *tids = malloc(sizeof(*tids) * PULL_SEGS);
-		long long part = want / PULL_SEGS;
-		int i, spawned = 0, rc = -1;
+		long long part = (want - base) / PULL_SEGS;
+		int i, alive = 0, fail = 0, rc = -1;
 
 		if (!segs || !tids) {
 			free(segs);
@@ -1300,35 +1312,50 @@ pull_download(const char *url, const char *local)
 			return -1;
 		}
 
-		out = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-		if (out < 0)
+		out = open(local, O_WRONLY | O_CREAT | (base ? 0 : O_TRUNC), 0644);
+		if (out < 0) {
+			free(segs);
+			free(tids);
 			return -1;
-		/* pre-size so every segment has its range on disk */
+		}
+		/* pre-size so every segment has its range on disk
+		 * (keeps resumed bytes: extend-only, never shrinks data) */
 		if (ftruncate(out, (off_t)want) != 0) {
 			close(out);
+			free(segs);
+			free(tids);
 			return -1;
 		}
 		close(out);
 		for (i = 0; i < PULL_SEGS; i++) {
+			long long s0 = base + part * i;
+			long long s1 = (i == PULL_SEGS - 1) ? want : base + part * (i + 1);
+
 			snprintf(segs[i].host, sizeof(segs[i].host), "%s", host);
 			snprintf(segs[i].portstr, sizeof(segs[i].portstr), "%s", portstr);
 			snprintf(segs[i].get, sizeof(segs[i].get), "%s", get);
 			snprintf(segs[i].local, sizeof(segs[i].local), "%s", local);
-			segs[i].start = part * i;
-			segs[i].len = (i == PULL_SEGS - 1) ? (want - part * i) : part;
+			segs[i].start = s0;
+			segs[i].len = s1 - s0;
+			if (segs[i].len <= 0) {
+				segs[i].ok = 1; /* nothing left in this slice */
+				continue;
+			}
 			segs[i].ok = 0;
-			if (pthread_create(&tids[i], NULL, pull_seg_worker, &segs[i]) != 0)
+			if (pthread_create(&tids[alive], NULL, pull_seg_worker, &segs[i]) != 0) {
+				fail = 1;
 				break;
-			spawned++;
+			}
+			alive++;
 		}
-		if (spawned != PULL_SEGS) {
-			for (i = 0; i < spawned; i++)
+		if (fail) {
+			for (i = 0; i < alive; i++)
 				pthread_join(tids[i], NULL);
 			free(segs);
 			free(tids);
 			return -1;
 		}
-		for (i = 0; i < PULL_SEGS; i++)
+		for (i = 0; i < alive; i++)
 			pthread_join(tids[i], NULL);
 		rc = 0;
 		for (i = 0; i < PULL_SEGS; i++)
@@ -1346,9 +1373,15 @@ pull_download(const char *url, const char *local)
 	s = pull_connect(host, portstr);
 	if (s < 0)
 		return -1;
-	snprintf(req, sizeof(req),
-	    "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
-	    get, host);
+	if (base > 0)
+		snprintf(req, sizeof(req),
+		    "GET %s HTTP/1.0\r\nHost: %s\r\n"
+		    "Range: bytes=%lld-\r\nConnection: close\r\n\r\n",
+		    get, host, base);
+	else
+		snprintf(req, sizeof(req),
+		    "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
+		    get, host);
 	if (pull_send(s, req, strlen(req)) < 0) {
 		close(s);
 		return -1;
@@ -1363,12 +1396,19 @@ pull_download(const char *url, const char *local)
 		if (want < 0)
 			want = pull_clen(hs);
 	}
-	out = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	out = open(local, O_WRONLY | O_CREAT | (base ? 0 : O_TRUNC), 0644);
 	if (out < 0) {
 		close(s);
 		return -1;
 	}
+	if (base > 0 && lseek(out, (off_t)base, SEEK_SET) == (off_t)-1) {
+		close(s);
+		close(out);
+		return -1;
+	}
 	g_pull_want = want;
+	g_pull_got = base;
+	got = base;
 	/* heap, not stack: PULL_CHUNK would risk the worker thread's stack */
 	{
 		char *hb = malloc(PULL_CHUNK);
@@ -1428,11 +1468,12 @@ pull_worker(void *arg)
 	}
 	g_pull_active = 1;
 	__sync_fetch_and_add(&g_active_installs, 1);
-	rc = pull_download(job->url, job->local);
+ 	rc = pull_download(job->url, job->local, job->resume);
 	__sync_fetch_and_sub(&g_active_installs, 1);
 	g_pull_active = 0;
 	if (rc == 0)
-		snprintf(toast, sizeof(toast), "Loopayeh: copied %s", base);
+		snprintf(toast, sizeof(toast), "Loopayeh: %s %s",
+		    job->resume ? "resumed" : "copied", base);
 	else if (rc == 1)
 		snprintf(toast, sizeof(toast),
 		    "Loopayeh: %s already there", base);
@@ -1844,6 +1885,7 @@ handle_client(int fd)
 	} else if (!strcmp(method, "POST") &&
 	           !strncmp(path, "/api/files/pull", 15)) {
 		char url[URL_MAX], rpath[PATH_MAX_V], local[PATH_MAX_V];
+		char mode[16] = "";
 
 		if (!json_string(body, "url", url, sizeof(url)) ||
 		    !json_string(body, "path", rpath, sizeof(rpath)) ||
@@ -1853,6 +1895,7 @@ handle_client(int fd)
 		} else {
 			pull_job_t *job = malloc(sizeof(*job));
 			pthread_t tid;
+			json_string(body, "mode", mode, sizeof(mode));
 			if (!job) {
 				send_text(fd, "error:out of memory");
 			} else {
@@ -1860,6 +1903,7 @@ handle_client(int fd)
 				    "%s", url);
 				snprintf(job->local, sizeof(job->local),
 				    "%s", local);
+				job->resume = !strcmp(mode, "resume");
 				if (pthread_create(&tid, NULL, pull_worker,
 				    job) != 0) {
 					free(job);

@@ -1234,6 +1234,32 @@ public partial class LibraryView : UserControl
             _registry[id] = g.Path;
             string url = _server!.UrlFor(_m.PcIp, id);
             string remote = "/data/homebrew/" + Path.GetFileName(g.Path);
+            // Partial file on the console? Offer Resume / Overwrite / Cancel.
+            bool resume = false;
+            {
+                var (exists, size) = await LoopDPI.Core.ConsoleClient.StatAsync(_m.PsIp, remote);
+                if (exists && size == g.SizeBytes && g.SizeBytes > 0)
+                {
+                    var doneRow = new QueueItem { Game = g, State = "sent", Message = "already there ✓", Percent = 100 };
+                    _m.Queue.Add(doneRow);
+                    UpdateQueueLabel();
+                    ok++;
+                    continue;
+                }
+                if (exists && size > 0 && size < g.SizeBytes)
+                {
+                    var owner = Top as Window;
+                    var dlg = new CopyChoiceDialog(Path.GetFileName(g.Path),
+                        Program.FormatSize(size), Program.FormatSize(g.SizeBytes));
+                    await dlg.ShowDialog(owner);
+                    if (dlg.Result == CopyChoiceDialog.Choice.Cancel)
+                    {
+                        _m.Status = $"Skipped {g.Title}.";
+                        continue;
+                    }
+                    resume = dlg.Result == CopyChoiceDialog.Choice.Resume;
+                }
+            }
             _m.Status = $"Copying {g.Title} to homebrew…";
             // Local preflight: can our own server serve this id at all?
             string localCheck;
@@ -1250,14 +1276,14 @@ public partial class LibraryView : UserControl
             {
                 localCheck = "LOCAL-FAIL:" + Short(ex.Message);
             }
-            var (started, reply) = await LoopDPI.Core.ConsoleClient.PullAsync(_m.PsIp, url, remote);
+            var (started, reply) = await LoopDPI.Core.ConsoleClient.PullAsync(_m.PsIp, url, remote, resume);
             PullLog($"{DateTime.Now:HH:mm:ss} {g.Title} local={localCheck} started={started} reply={reply}");
             if (started)
             {
                 ok++;
                 // Copy rows live in the queue below with their own progress
                 // bar (State "copying": no pause/resume — those are install-only).
-                var row = new QueueItem { Game = g, State = "copying", Message = "copying…", Percent = 0 };
+                var row = new QueueItem { Game = g, State = "copying", Message = resume ? "resuming…" : "copying…", Percent = 0 };
                 _m.Queue.Add(row);
                 UpdateQueueLabel();
                 // Follow the copy: poll the receiver's pull progress so a
