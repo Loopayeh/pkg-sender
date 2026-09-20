@@ -1157,14 +1157,33 @@ public partial class LibraryView : UserControl
                 return;
             }
             _server!.CatalogProvider = BuildCatalog;
+            StartPcAnnounce();
             Post(() => _m.Status = $"Library published: {_server!.CatalogUrlFor(_m.PcIp)} — open it from the console browser (pkg remote installer).");
         }
         else
         {
             if (_server != null)
                 _server.CatalogProvider = null;
+            StopPcAnnounce();
             Post(() => _m.Status = "Library unpublished.");
         }
+    }
+
+    private System.Threading.CancellationTokenSource? _publishCts;
+
+    /// <summary>Broadcast our catalog endpoint while published (console auto-find).</summary>
+    private void StartPcAnnounce()
+    {
+        StopPcAnnounce();
+        var cts = new System.Threading.CancellationTokenSource();
+        _publishCts = cts;
+        _ = LoopDPI.Core.NetDiscovery.AnnouncePcAsync(_m.PcIp, _server!.Port, cts.Token);
+    }
+
+    private void StopPcAnnounce()
+    {
+        try { _publishCts?.Cancel(); } catch { }
+        _publishCts = null;
     }
 
     /// <summary>
@@ -1208,6 +1227,10 @@ public partial class LibraryView : UserControl
                     TitleId = g.TitleId,
                     Version = g.Version,
                     Size = g.SizeBytes,
+                    SizeText = g.SizeText,
+                    Role = g.Role,
+                    FamilyKey = g.FamilyKey,
+                    Platform = g.IsPs4 ? "PS4" : "PS5",
                     HasIcon = hasIcon,
                 });
             }

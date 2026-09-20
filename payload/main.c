@@ -8,6 +8,10 @@
  *                          ("pkg remote installer", PKGS12800) on startup
  *   GET  /api            - probe (open, no action)
  *   GET  /api/status     - {"busy":true/false,"active":N} install state
+ *   GET  /api/pc         - {"pc":"1.2.3.4","age":N} last PC announce
+ *                          (the PC broadcasts "PKGSENDER-PC ip:port" to UDP
+ *                          12802 while Publish library is on; browsers can't
+ *                          hear UDP, so we re-serve it here)
  *   GET  /install?url=   - install by query arg
  *   POST /api/install    - JSON {"packages":["<url>"]}
  *   POST /upload         - multipart form with a url field
@@ -298,6 +302,11 @@ typedef struct install_job {
 
 /* active install count for GET /api/status (multi-PKG queue pacing) */
 static volatile int g_active_installs = 0;
+
+/* last PC auto-announce (UDP 12802), re-served as GET /api/pc.
+ * Defined with storage below; tentative here for handle_client. */
+static char g_pc_addr[64];
+static volatile time_t g_pc_seen;
 
 static void *
 install_worker(void *arg)
@@ -736,6 +745,13 @@ static const char UI_HTML[] =
 "h2{color:#7fd4ff;margin:0 0 12px}#tabs{display:flex;gap:8px;margin-bottom:14px}"
 "#tabs button{flex:1;padding:12px;background:#1c232c;border:1px solid #7fd4ff;border-radius:6px;color:#7fd4ff;font-size:16px;font-weight:bold;cursor:pointer}"
 "#tabs button.on{background:#7fd4ff;color:#101418}"
+"#pcrow{display:flex;gap:8px;margin-bottom:12px;align-items:center}"
+"#pcstat{font-size:13px;color:#8B93A5;white-space:nowrap}"
+"#tools{display:flex;gap:8px;margin-bottom:12px}"
+"#tools input{flex:1}"
+"#chips{display:flex;gap:6px}"
+"#chips button{padding:12px 14px;background:#1c232c;border:1px solid #7fd4ff;border-radius:6px;color:#7fd4ff;font-size:14px;cursor:pointer}"
+"#chips button.on{background:#7fd4ff;color:#101418}"
 "#cfg{display:flex;gap:8px;margin-bottom:12px}"
 "input{flex:1;padding:12px;border:1px solid #7fd4ff;border-radius:6px;background:#0b0e12;color:#eee;font-size:15px}"
 "button.go{padding:12px;background:#7fd4ff;border:none;border-radius:6px;color:#101418;font-size:15px;font-weight:bold;cursor:pointer}"
@@ -745,16 +761,30 @@ static const char UI_HTML[] =
 ".card .t{font-size:13px;margin:8px 0 2px;min-height:32px}"
 ".card .m{font-size:11px;color:#8B93A5;margin-bottom:8px}"
 ".card button{width:100%;padding:10px;background:#7fd4ff;border:none;border-radius:6px;color:#101418;font-weight:bold;cursor:pointer}"
+".fc{display:inline-block;font-size:11px;color:#7fd4ff;border:1px solid #7fd4ff;border-radius:10px;padding:2px 8px;margin-top:4px}"
+".fambox{margin-top:8px;display:flex;flex-direction:column;gap:6px}"
+".member{display:flex;gap:8px;align-items:center;background:#0b0e12;border-radius:6px;padding:8px;text-align:left}"
+".member .t{font-size:12px}.member .m{font-size:11px;color:#8B93A5}"
+".member div:first-child{flex:1}"
+".rb{font-size:10px;color:#101418;background:#7fd4ff;border-radius:4px;padding:2px 6px;margin-right:6px}"
+".member button{padding:8px 12px;background:#7fd4ff;border:none;border-radius:6px;color:#101418;font-weight:bold;cursor:pointer}"
 "#msg{margin-top:14px;font-size:14px;min-height:20px}"
 "form#mf{display:flex;flex-direction:column;gap:12px;width:90%;max-width:520px;margin:0 auto}</style></head><body>"
 "<h2>pkg remote installer</h2>"
 "<div id=tabs><button id=tabL class=on>Library</button><button id=tabM>Manual URL</button></div>"
-"<div id=lib><div id=cfg><input id=pc placeholder='PC address (e.g. 192.168.1.5)'>"
-"<button class=go id=save>Save &amp; load</button></div><div id=grid></div><div id=msg></div></div>"
+"<div id=lib>"
+"<div id=pcrow><span id=pcstat>PC: ...</span>"
+"<input id=pc placeholder='PC address'><button class=go id=save>Save</button></div>"
+"<div id=tools><input id=q placeholder='Search title or ID...'>"
+"<div id=chips><button data-p=all class=on>All</button><button data-p=PS5>PS5</button><button data-p=PS4>PS4</button></div></div>"
+"<div id=grid></div><div id=msg></div></div>"
 "<div id=man style='display:none'><form id=mf><input id=url type=url placeholder='http://192.168.x.x:9898/game.pkg' required>"
 "<button class=go type=submit>Install PKG</button></form><div id=st style='text-align:center'></div></div>"
 "<script>(function(){var pcEl=document.getElementById('pc');"
+"var pcstat=document.getElementById('pcstat');"
 "var grid=document.getElementById('grid');var msg=document.getElementById('msg');"
+"var qEl=document.getElementById('q');"
+"var all=[],openFam=null,plat='all';"
 "pcEl.value=localStorage.getItem('pri_pc')||'';"
 "function show(which){document.getElementById('lib').style.display=which?'':'none';"
 "document.getElementById('man').style.display=which?'none':'';"
@@ -763,32 +793,67 @@ static const char UI_HTML[] =
 "document.getElementById('tabL').onclick=function(){show(1);};"
 "document.getElementById('tabM').onclick=function(){show(0);};"
 "function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}"
+"function rank(r){return r==='Patch'?1:(r==='DLC'?2:0);}"
+"function lone(g){return (g.familyKey||'').indexOf('FILE:')===0;}"
+"function isBase(g){return g.role==='Game'||lone(g);}"
+"function matchQ(g){var q=qEl.value.trim().toLowerCase();if(!q)return 1;"
+"return (g.title+' '+g.titleId).toLowerCase().indexOf(q)>=0;}"
+"function matchP(g){if(plat==='all')return 1;return g.platform===plat;}"
 "async function install(id,name){msg.textContent='Installing '+name+'...';"
 "try{var u='http://'+pcEl.value+':9898/pkg/'+encodeURIComponent(id);"
 "var r=await fetch('/install?url='+encodeURIComponent(u));"
 "msg.textContent=await r.text();}catch(ex){msg.textContent='Error: '+ex;}}"
-"async function load(){var pc=pcEl.value.trim();"
-"if(!pc){msg.textContent='Enter the PC address first (PKG Sender shows it when Publish library is on).';return;}"
-"localStorage.setItem('pri_pc',pc);msg.textContent='Loading...';grid.innerHTML='';"
-"try{var r=await fetch('http://'+pc+':9898/catalog');"
-"var list=await r.json();"
-"if(!list.length){msg.textContent='Library is empty — tick Publish library in PKG Sender.';return;}"
-"msg.textContent=list.length+' games';"
-"list.forEach(function(g){var d=document.createElement('div');d.className='card';"
-"var im=g.hasIcon?'<img src=\"http://'+pc+':9898/icon/'+encodeURIComponent(g.id)+'\">':'';"
+"function card(g,sub){var d=document.createElement('div');d.className=sub?'member':'card';"
+"var im=(!sub&&g.hasIcon)?'<img src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'';"
 "var meta=esc(g.titleId||'');if(g.version)meta+=' v'+esc(g.version);"
-"d.innerHTML=im+'<div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div>';"
+"if(g.sizeText)meta+=' &middot; '+esc(g.sizeText);"
+"var badge=sub?'<span class=rb>'+esc(g.role)+'</span>':'';"
+"if(sub){d.innerHTML='<div><div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div></div>';"
+"var w=document.createElement('div');w.innerHTML=badge;"
 "var b=document.createElement('button');b.textContent='Install';"
-"b.onclick=function(){install(g.id,g.title);};d.appendChild(b);grid.appendChild(d);});}"
+"b.onclick=function(ev){ev.stopPropagation();install(g.id,g.title);};"
+"w.appendChild(b);d.appendChild(w);return d;}"
+"var fam=all.filter(function(m){return !isBase(m)&&m.familyKey===g.familyKey;});"
+"fam.sort(function(a,b){return rank(a.role)-rank(b.role);});"
+"var cnt=fam.length?'<span class=fc>'+fam.length+' add-on'+(fam.length>1?'s':'')+'</span>':'';"
+"d.innerHTML=im+'<div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div>'+cnt;"
+"var ib=document.createElement('button');ib.textContent='Install';"
+"ib.onclick=function(ev){ev.stopPropagation();install(g.id,g.title);};d.appendChild(ib);"
+"d.onclick=function(){openFam=(openFam===g.familyKey)?null:g.familyKey;render();};"
+"if(openFam===g.familyKey&&fam.length){var box=document.createElement('div');box.className='fambox';"
+"fam.forEach(function(m){box.appendChild(card(m,1));});"
+"var wrap=document.createElement('div');wrap.appendChild(d);wrap.appendChild(box);return wrap;}"
+"return d;}"
+"function render(){grid.innerHTML='';"
+"var bases=all.filter(function(g){return isBase(g)&&matchP(g)&&matchQ(g);});"
+"bases.sort(function(a,b){return a.title.toLowerCase()<b.title.toLowerCase()?-1:1;});"
+"if(!bases.length){msg.textContent=all.length?'No match.':'Library is empty — tick Publish library in PKG Sender.';return;}"
+"msg.textContent=bases.length+' games';"
+"bases.forEach(function(g){grid.appendChild(card(g,0));});}"
+"async function resolvePc(){"
+"try{var r=await fetch('/api/pc');var j=await r.json();"
+"if(j.pc&&j.age>=0&&j.age<15){pcEl.value=j.pc;pcstat.textContent='PC: '+j.pc+' (auto)';return j.pc;}}catch(e){}"
+"var m=(pcEl.value||localStorage.getItem('pri_pc')||'').trim();"
+"if(m){pcEl.value=m;pcstat.textContent='PC: '+m+' (manual)';return m;}"
+"pcstat.textContent='PC: ?';return '';}"
+"async function load(){var pc=await resolvePc();"
+"if(!pc){msg.textContent='No PC found — tick Publish library in PKG Sender, or type the PC address.';return;}"
+"localStorage.setItem('pri_pc',pc);msg.textContent='Loading...';grid.innerHTML='';all=[];"
+"try{var r=await fetch('http://'+pc+':9898/catalog');"
+"all=await r.json();openFam=null;render();}"
 "catch(ex){msg.textContent='Error: '+ex+' — is Publish library on and the PC reachable?';}}"
 "document.getElementById('save').onclick=load;"
+"qEl.oninput=render;"
+"var chips=document.getElementById('chips').children;"
+"for(var i=0;i<chips.length;i++)(function(c){c.onclick=function(){plat=c.getAttribute('data-p');"
+"for(var k=0;k<chips.length;k++)chips[k].className='';c.className='on';render();};})(chips[i]);"
 "document.getElementById('mf').onsubmit=async function(e){e.preventDefault();"
 "var u=document.getElementById('url').value;"
 "document.getElementById('st').textContent='Installing...';"
 "try{var r=await fetch('/install?url='+encodeURIComponent(u));"
 "var x=await r.text();document.getElementById('st').textContent=x;}"
 "catch(ex){document.getElementById('st').textContent='Error: '+ex;}};"
-"if(pcEl.value)load();})();</script>"
+"load();})();</script>"
 "</body></html>";
 #endif
 
@@ -952,6 +1017,15 @@ handle_client(int fd)
 		snprintf(out, sizeof(out), "{\"busy\":%s,\"active\":%d}",
 		    g_active_installs > 0 ? "true" : "false",
 		    g_active_installs);
+		send_json(fd, out);
+	} else if (!strcmp(method, "GET") &&
+	           !strncmp(path, "/api/pc", 7)) {
+		char out[128];
+		time_t now = time(NULL);
+		long age = g_pc_seen > 0 ? (long)(now - g_pc_seen) : -1;
+
+		snprintf(out, sizeof(out), "{\"pc\":\"%s\",\"age\":%ld}",
+		    g_pc_addr, age);
 		send_json(fd, out);
 	} else if (!strcmp(method, "GET")) {
 		send_html(fd, UI_HTML);
@@ -1120,6 +1194,66 @@ beacon_start(void)
 		pthread_detach(tid);
 }
 
+/* ── PC auto-announce listener ─────────────────────────────────────────
+ * While Publish library is on, the PC broadcasts "PKGSENDER-PC ip:port"
+ * to UDP 12802 every 3s. Browsers can't hear UDP, so we listen here and
+ * re-serve the last announcement to the Library page over HTTP
+ * (GET /api/pc). */
+#define PC_ANNOUNCE_PORT 12802
+#define PC_ANNOUNCE_MAGIC "PKGSENDER-PC "
+
+static char g_pc_addr[64] = "";
+static volatile time_t g_pc_seen = 0;
+
+static void *
+pc_listen_worker(void *arg)
+{
+	(void)arg;
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	struct sockaddr_in sa, from;
+	socklen_t fl;
+	char buf[128];
+	ssize_t n;
+
+	if (fd < 0)
+		return NULL;
+	memset(&sa, 0, sizeof(sa));
+	sa.sin_family = AF_INET;
+	sa.sin_addr.s_addr = htonl(INADDR_ANY);
+	sa.sin_port = htons(PC_ANNOUNCE_PORT);
+	if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) != 0) {
+		close(fd);
+		return NULL;
+	}
+	for (;;) {
+		fl = sizeof(from);
+		n = recvfrom(fd, buf, sizeof(buf) - 1, 0,
+		    (struct sockaddr *)&from, &fl);
+		if (n <= 0)
+			continue;
+		buf[n] = '\0';
+		if (strncmp(buf, PC_ANNOUNCE_MAGIC,
+		    sizeof(PC_ANNOUNCE_MAGIC) - 1) != 0)
+			continue;
+		if (from.sin_family != AF_INET)
+			continue;
+		if (!inet_ntop(AF_INET, &from.sin_addr,
+		    g_pc_addr, sizeof(g_pc_addr)))
+			continue;
+		g_pc_seen = time(NULL);
+	}
+	return NULL;
+}
+
+static void
+pc_listen_start(void)
+{
+	pthread_t tid;
+
+	if (pthread_create(&tid, NULL, pc_listen_worker, NULL) == 0)
+		pthread_detach(tid);
+}
+
 /* ── Process identity + self-replacement ───────────────────────────────
  * Name our main thread so process managers (e.g. itsPLK's
  * ps5-payload-manager, which lists ki_comm/ki_tdname) show us as
@@ -1215,6 +1349,7 @@ main(void)
 	    );
 
 	beacon_start();
+	pc_listen_start();
 
 #ifndef TEST_ONLY
 	launcher_install_if_needed();

@@ -109,6 +109,30 @@ public static class NetDiscovery
     public const int ReceiverPort = 12800;
     public const int BeaconPort = 12801;
     public const string BeaconMagic = "PKGSENDER";
+    /// <summary>PC announce (reverse direction): while Publish library is on,
+    /// the PC broadcasts its catalog endpoint so the console browser finds
+    /// it without manual IP entry. Browsers can't hear UDP, so the receiver
+    /// listens and re-serves the last announcement over HTTP (/api/pc).</summary>
+    public const int PcAnnouncePort = 12802;
+    public const string PcAnnounceMagic = "PKGSENDER-PC";
+
+    public static async Task AnnouncePcAsync(string pcIp, int catalogPort, CancellationToken ct)
+    {
+        try
+        {
+            using var udp = new UdpClient();
+            udp.EnableBroadcast = true;
+            var ep = new IPEndPoint(IPAddress.Broadcast, PcAnnouncePort);
+            byte[] msg = Encoding.ASCII.GetBytes($"{PcAnnounceMagic} {pcIp}:{catalogPort}");
+            while (!ct.IsCancellationRequested)
+            {
+                try { await udp.SendAsync(msg, msg.Length, ep); } catch { }
+                await Task.Delay(3000, ct);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch { }
+    }
     public const int MaxHostsPerNic = 4096;
 
     /// <summary>Every active non-loopback IPv4 NIC with its own subnet.</summary>

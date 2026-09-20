@@ -89,6 +89,7 @@ under `/data/homebrew`. This API is not stable and may change between versions.
 | ------ | ---- | ----- | ----- |
 | GET | `/api` | — | probe (online check, no action) |
 | GET | `/api/status` | — | `{"busy":bool,"active":N}` |
+| GET | `/api/pc` | — | `{"pc":"1.2.3.4","age":N}` (last PC announce, `age` -1 = never) |
 | POST | `/api/install` | `{"packages":["<url>"],"name":"...","icon_url":"..."}` (`name`/`icon_url` optional) | `{"status":"success"}` or `{"status":"fail",...}` |
 | GET | `/install?url=` | PKG URL as query arg | starts install, plain-text reply |
 | GET | `/api/files/stat?path=` | remote path | `{"exists":bool,"size":N}` |
@@ -105,19 +106,22 @@ Browse and install the scanned PC library from the console's own browser —
 no need to walk back to the PC:
 
 1. In PKG Sender, scan your folders, then tick **Publish library**. The status
-   bar shows the catalog URL (`http://<pc-ip>:9898/catalog`).
+   bar shows the catalog URL (`http://<pc-ip>:9898/catalog`). While published,
+   the PC also broadcasts `PKGSENDER-PC <pc-ip>:9898` to UDP `255.255.255.255:12802`
+   every 3 seconds, so the console finds it automatically (no manual IP entry).
 2. On first run the receiver installs a **pkg remote installer** shortcut on
    the PS5 home screen (Media category, `PKGS12800`). Open it — or browse to
    `http://<console-ip>:12800/` manually.
-3. **Library tab**: enter the PC address once (remembered in the browser),
-   pick a game by its cover, press Install. **Manual URL tab** keeps the old
-   paste-a-link form as fallback.
+3. **Library tab**: base games only (alphabetical, with covers, sizes and IDs);
+   click a base game to expand its updates/DLCs, each with its own Install
+   button. Search filters by title or Title ID; chips filter PS5/PS4.
+   **Manual URL tab** keeps the old paste-a-link form as fallback.
 
 Published endpoints on the PC file server (`:9898`, PKG only, CORS-open):
 
 | Method | Path | Reply |
 | ------ | ---- | ----- |
-| GET | `/catalog` | `[{"id","title","titleId","version","size","hasIcon"}]` |
+| GET | `/catalog` | `[{"id","title","titleId","version","size","sizeText","role","familyKey","platform","hasIcon"}]` (`role` = Game/Patch/DLC) |
 | GET | `/icon/{id}` | cover PNG (`image/png`) |
 | GET | `/pkg/{id}` | PKG bytes (range-capable, same as pushes use) |
 
