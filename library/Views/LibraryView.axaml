@@ -12,6 +12,7 @@
     <views:Ps5ImageBackgroundConverter x:Key="Ps5ImgBg"/>
     <views:Ps5CardPaddingConverter x:Key="Ps5CardPad"/>
     <views:SelectedBorderConverter x:Key="SelBorder"/>
+    <views:FormatBadgeConverter x:Key="FormatBadge"/>
   </UserControl.Resources>
   <Design.DataContext>
     <vm:LibraryViewModel/>
@@ -140,8 +141,8 @@
                           <Border Background="#E8A34C" CornerRadius="4" Padding="8,2" IsVisible="{Binding IsDlc}">
                             <TextBlock Text="DLC" FontSize="11" FontWeight="Bold" Foreground="#171717"/>
                           </Border>
-                          <Border Background="#7B61FF" CornerRadius="4" Padding="8,2" IsVisible="{Binding IsImage}">
-                            <TextBlock Text="IMG" FontSize="11" FontWeight="Bold" Foreground="#FFFFFF"/>
+                          <Border Background="{Binding Format, Converter={StaticResource FormatBadge}}" CornerRadius="4" Padding="8,2" IsVisible="{Binding IsImage}">
+                            <TextBlock Text="{Binding FormatLabel}" FontSize="11" FontWeight="Bold" Foreground="#FFFFFF"/>
                           </Border>
                           <Button Name="LinkBtn" Content="{Binding FamilyCount, StringFormat='🔗×{0}'}"
                                   IsVisible="{Binding HasFamily}" ToolTip.Tip="{Binding FamilyTip}"

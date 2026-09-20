@@ -14,6 +14,7 @@ public sealed class GameItem : ReactiveObject
     public long SizeBytes { get; init; }
     public string Platform { get; init; } = "";
     public string Format { get; init; } = "pkg";
+    public string FormatLabel { get; init; } = "PKG";
     public bool IsFolder { get; init; }
     public string ContentId { get; init; } = "";
     public string TitleId { get; init; } = "";

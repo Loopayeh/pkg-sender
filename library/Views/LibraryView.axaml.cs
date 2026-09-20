@@ -812,6 +812,7 @@ public partial class LibraryView : UserControl
                             ? (string.IsNullOrWhiteSpace(g.Info.Platform) ? "PKG" : g.Info.Platform)
                             : $"{(string.IsNullOrWhiteSpace(g.Info.Platform) ? "PS5" : g.Info.Platform)} • {g.Info.Format}",
                         Format = fmt,
+                        FormatLabel = fmt.ToUpperInvariant(),
                         IsFolder = g.Info.IsFolder,
                         ContentId = g.Info.ContentId,
                         TitleId = g.Info.TitleId ?? "",

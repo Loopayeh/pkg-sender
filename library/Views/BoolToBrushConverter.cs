@@ -33,6 +33,24 @@ public sealed class SelectedBorderConverter : IValueConverter
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => throw new NotSupportedException();
 }
+
+/// <summary>Image format badge colors, mirrored from pkg-viewer's
+/// per-format icons (dominant hues): pkg blue, exfat teal,
+/// ffpfsc gold, ffpkg purple.</summary>
+public sealed class FormatBadgeConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => (value as string)?.ToLowerInvariant() switch
+        {
+            "exfat" => new SolidColorBrush(Color.Parse("#34B595")),
+            "ffpfsc" => new SolidColorBrush(Color.Parse("#CE9C40")),
+            "ffpkg" => new SolidColorBrush(Color.Parse("#A27AD8")),
+            _ => new SolidColorBrush(Color.Parse("#6498F0")),
+        };
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
 public sealed class Ps5CardPaddingConverter : IValueConverter
 {
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
