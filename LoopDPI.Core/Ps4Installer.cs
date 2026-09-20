@@ -54,6 +54,21 @@ public static class Ps4Installer
 
     public static async Task<string> DetectAsync(string ip)
     {
+        // Detection probes several ports with second-scale timeouts; cache
+        // per IP so rapid pushes (queue) don't pay it every time. 60s TTL:
+        // long enough to matter, short enough to notice a fresh RPI/HEN.
+        if (_detectCache.TryGetValue(ip, out var hit) &&
+            (DateTime.UtcNow - hit.At).TotalSeconds < 60)
+            return hit.Mode;
+        string mode = await DetectUncachedAsync(ip);
+        _detectCache[ip] = (mode, DateTime.UtcNow);
+        return mode;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Mode, DateTime At)> _detectCache = new();
+
+    private static async Task<string> DetectUncachedAsync(string ip)
+    {
         if (await IsRpiOnlineAsync(ip)) return "rpi";
         if (await IsEtaHenOnlineAsync(ip)) return "etahen";
         if (await IsGoldHenOnlineAsync(ip)) return "goldhen";
@@ -197,10 +212,11 @@ public static class Ps4Installer
     /// <summary>
     /// GoldHEN install: local callback listener + payload inject + PKG info struct.
     /// fileUrl must already be the PC file-server URL (RangeFileServer.UrlFor).
-    /// The binloader drops connections and goes deaf often, so this retries
-    /// the whole inject a few times. Safe rule: once the console called back
-    /// (an install started there) we NEVER re-inject — that would duplicate
-    /// the install. Only silent attempts are retried.
+    /// DPI rule: ONE inject per push, never more. The binloader drops
+    /// connections often, so connecting+sending is retried — but once the
+    /// bytes are on the wire we wait for the callback exactly once. A second
+    /// inject would start a DUPLICATE install (double console notification).
+    /// No callback → honest fail, manual ⟳ Reinstall.
     /// </summary>
     public static async Task<(bool Ok, string Reply)> PushGoldHenAsync(
         string psIp, string pcIp, string fileUrl, PkgInfo pkg, int fileServerPort = 9898, int timeoutSec = 15, int attempts = 3)
@@ -212,30 +228,9 @@ public static class Ps4Installer
         if (marker < 0)
             return (false, "payload marker not found");
 
-        string lastErr = "";
-        for (int a = 1; a <= attempts; a++)
-        {
-            var (ok, reply, callbackSeen) = await TryPushGoldHenOnceAsync(
-                psIp, pcIp, fileUrl, pkg, timeoutSec, payload, marker, a, attempts);
-            if (ok)
-                return (true, reply);
-            lastErr = reply;
-            if (callbackSeen)
-                return (false, reply); // started on console — never duplicate
-            if (a < attempts)
-            {
-                try { await Task.Delay(2000 * a); } catch { }
-            }
-        }
-        return (false, lastErr + $" (after {attempts} tries — re-enable the GoldHEN Payload Server / BinLoader on the console and retry)");
-    }
-
-    private static async Task<(bool Ok, string Reply, bool CallbackSeen)> TryPushGoldHenOnceAsync(
-        string psIp, string pcIp, string fileUrl, PkgInfo pkg, int timeoutSec,
-        byte[] payload, int marker, int attempt, int attempts)
-    {
-        string tag = attempts > 1 ? $" [try {attempt}/{attempts}]" : "";
-        // callback listener (PS4 connects back with PKG info request)
+        // callback listener (PS4 connects back with PKG info request).
+        // Bound once: the port is patched into the payload, so every
+        // send-attempt shares it and exactly one callback is ever awaited.
         using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         try
         {
@@ -244,7 +239,7 @@ public static class Ps4Installer
         }
         catch (Exception ex)
         {
-            return (false, "PC listener failed: " + ex.Message + tag, false);
+            return (false, "PC listener failed: " + ex.Message);
         }
         int cbPort = ((IPEndPoint)listener.LocalEndPoint!).Port;
 
@@ -256,36 +251,58 @@ public static class Ps4Installer
         }
         catch
         {
-            return (false, "bad PC IP for payload patch: " + pcIp + tag, false);
+            return (false, "bad PC IP for payload patch: " + pcIp);
         }
         byte[] portBytes = BitConverter.GetBytes((ushort)cbPort);
         if (BitConverter.IsLittleEndian) Array.Reverse(portBytes);
         portBytes.CopyTo(patched, marker + 4);
 
-        using var ps = await ConnectPayloadAsync(psIp);
-        if (ps == null)
-            return (false, "binloader closed on 9090/9021/9020 — re-enable the GoldHEN Payload Server / BinLoader" + tag, false);
+        // Phase 1 (retried): get the bytes into the binloader.
+        string lastErr = "";
+        bool injected = false;
+        for (int a = 1; a <= attempts; a++)
+        {
+            string tag = attempts > 1 ? $" [try {a}/{attempts}]" : "";
+            using var ps = await ConnectPayloadAsync(psIp);
+            if (ps == null)
+            {
+                lastErr = "binloader closed on 9090/9021/9020 — re-enable the GoldHEN Payload Server / BinLoader" + tag;
+            }
+            else
+            {
+                try
+                {
+                    try { ps.SendBufferSize = patched.Length; } catch { }
+                    int sent = 0;
+                    while (sent < patched.Length)
+                        sent += ps.Send(patched, sent, patched.Length - sent, SocketFlags.None);
+                    if (sent != patched.Length)
+                        lastErr = "payload short-send" + tag;
+                    else
+                    {
+                        injected = true;
+                        break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastErr = "payload send failed: " + ex.Message + tag;
+                }
+                finally
+                {
+                    try { ps.Shutdown(SocketShutdown.Both); } catch { }
+                    ps.Close();
+                }
+            }
+            if (a < attempts)
+            {
+                try { await Task.Delay(2000 * a); } catch { }
+            }
+        }
+        if (!injected)
+            return (false, lastErr + $" (after {attempts} tries — re-enable the GoldHEN Payload Server / BinLoader on the console and retry)");
 
-        try { ps.SendBufferSize = patched.Length; } catch { }
-        try
-        {
-            int sent = 0;
-            while (sent < patched.Length)
-                sent += ps.Send(patched, sent, patched.Length - sent, SocketFlags.None);
-            if (sent != patched.Length)
-                return (false, "payload short-send" + tag, false);
-        }
-        catch (Exception ex)
-        {
-            return (false, "payload send failed: " + ex.Message + tag, false);
-        }
-        finally
-        {
-            try { ps.Shutdown(SocketShutdown.Both); } catch { }
-            ps.Close();
-        }
-
-        // wait for PS4 callback
+        // Phase 2 (once): wait for the single callback, then hand over the PKG.
         Socket? cb;
         try
         {
@@ -294,8 +311,15 @@ public static class Ps4Installer
         }
         catch
         {
-            return (false, "payload sent but console did not call back (PC IP / firewall?)" + tag, false);
+            return (false, "payload sent but console did not call back (PC IP / firewall?) — use ⟳ Reinstall, never auto-pushed twice");
         }
+        return AnswerGoldHenCallback(cb, fileUrl, pkg);
+    }
+
+    /// <summary>Send the PKG info struct over an accepted console callback.</summary>
+    private static (bool Ok, string Reply) AnswerGoldHenCallback(
+        Socket cb, string fileUrl, PkgInfo pkg)
+    {
         using (cb)
         {
             cb.NoDelay = true;
@@ -327,9 +351,9 @@ public static class Ps4Installer
                 while (sent < buf.Length)
                     sent += cb.Send(buf, sent, buf.Length - sent, SocketFlags.None);
             }
-            catch (Exception ex) { return (false, "callback send failed: " + ex.Message + tag, true); }
+            catch (Exception ex) { return (false, "callback send failed: " + ex.Message); }
         }
-        return (true, "Package Sent via GoldHEN" + tag, true);
+        return (true, "Package Sent via GoldHEN");
     }
 
     private static int IndexOf(byte[] hay, byte[] needle)

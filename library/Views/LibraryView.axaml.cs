@@ -41,8 +41,7 @@ public partial class LibraryView : UserControl
     private readonly List<QueueItem> _runQueue = new();
     private readonly object _runLock = new();
     private bool _running;
-    private volatile bool _stop;
-    private volatile bool _copyStop; // set by ■ Stop: copy poll loop reports "stopped"
+    private volatile bool _copyStop; // copy poll loop reports "stopped" when set
     // Zero-config networking: real NIC subnets, beacon-first discovery.
     private List<LoopDPI.Core.LanNetwork> _nets = new();
     private readonly Avalonia.Threading.DispatcherTimer _liveTimer = new();
@@ -557,10 +556,10 @@ public partial class LibraryView : UserControl
         lock (_runLock)
         {
             wasPending = _runQueue.Remove(row);
-            _stallSkips.Remove(row);
             if (wasPending)
             {
                 _speedSamples.Remove(row);
+                _stallSince.Remove(row);
             }
             else if (_activeIds.TryGetValue(row, out var id))
             {
@@ -569,6 +568,7 @@ public partial class LibraryView : UserControl
                 _activeIdle.Remove(row);
                 _activeSince.Remove(row);
                 _speedSamples.Remove(row);
+                _stallSince.Remove(row);
             }
         }
         if (wasPending)
@@ -628,6 +628,7 @@ public partial class LibraryView : UserControl
                     _activeIdle.Remove(row);
                     _activeSince.Remove(row);
                     _speedSamples.Remove(row);
+                _stallSince.Remove(row);
                     row.CanResume = true;
                 }
                 Post(() => row.Message = "paused");
@@ -693,7 +694,6 @@ public partial class LibraryView : UserControl
         {
             if (!_pathIds.TryGetValue(row.Game.Path, out id!))
                 return;
-            _stop = false;
             _activeIds[row] = id;
             _activeIdle[row] = 0;
             _activeSince[row] = DateTime.UtcNow;
@@ -741,8 +741,7 @@ public partial class LibraryView : UserControl
             bool startWorker = false;
             lock (_runLock)
             {
-                _stop = false;
-                _copyStop = false;
+                    _copyStop = false;
                 foreach (var q in _m.Queue)
                 {
                     if (q.IsSent)
@@ -790,8 +789,6 @@ public partial class LibraryView : UserControl
         bool startWorker = false;
         lock (_runLock)
         {
-            _stop = false;
-            _stallSkips.Remove(row);
             _runQueue.Remove(row);
             _runQueue.Insert(0, row);
             if (!_running)
@@ -1383,7 +1380,6 @@ public partial class LibraryView : UserControl
         bool alreadyRunning;
         lock (_runLock)
         {
-            _stop = false;
             foreach (var g in wanted)
             {
                 var qi = new QueueItem { Game = g, State = "queued", Message = "waiting…" };
@@ -1800,9 +1796,22 @@ public partial class LibraryView : UserControl
     private readonly Dictionary<QueueItem, string> _activeIds = new();
     private readonly Dictionary<QueueItem, int> _activeIdle = new();
     private readonly Dictionary<QueueItem, DateTime> _activeSince = new();
+    // Last (time, bytes) per active row: 10 min of zero progress mid-download
+    // fails the row honestly (manual ⟳ Reinstall) — never auto-retried,
+    // never blocking the rest of the queue.
+    private readonly Dictionary<QueueItem, (DateTime T, long Bytes)> _stallSince = new();
     // ETA tracking: last (time, total served bytes) sample across ticks.
     private DateTime _etaLastTime = DateTime.UtcNow;
     private long _etaLastServed;
+
+    // DPI model: push, the console owns its install queue (BGFT/RPI keep
+    // going even if this app closes). The worker tracks progress — it never
+    // auto-retries. A stuck row fails honestly (manual ⟳ Reinstall).
+    // Sequential (PS4) gate: the next push waits until the previous download
+    // is done — unless it stalls (no bytes for GateSkipAfter), in which case
+    // the next one goes anyway while the stalled row keeps its own honest
+    // timeout. So pause-on-console holds the gate briefly, never forever.
+    private static readonly TimeSpan GateSkipAfter = TimeSpan.FromSeconds(60);
 
     private async Task RunQueueAsync()
     {
@@ -1815,14 +1824,29 @@ public partial class LibraryView : UserControl
                 bool hasActive;
                 lock (_runLock)
                 {
-                    if (_stop)
-                        break;
                     // Paused rows stay queued until started again.
-                    // Sequential (PS4) takes ONE row at a time so the rest
-                    // stay in _runQueue: reorderable, pausable, skippable.
-                    // (Draining all at once orphaned them from MoveRow.)
+                    // Waiting rows stay in _runQueue: reorderable, pausable.
                     var waiting = _runQueue.Where(q => !q.IsPaused).ToList();
-                    toPush = _m.SequentialMode ? waiting.Take(1).ToList() : waiting;
+                    toPush = waiting;
+                    if (_m.SequentialMode && waiting.Count > 0)
+                    {
+                        // One-by-one: hold while a previous download is alive.
+                        bool held = false;
+                        foreach (var a in _activeIds.Keys)
+                        {
+                            DateTime lastT;
+                            if (_stallSince.TryGetValue(a, out var st))
+                                lastT = st.T;
+                            else if (!_activeSince.TryGetValue(a, out lastT))
+                                continue;
+                            if ((DateTime.UtcNow - lastT) < GateSkipAfter)
+                            {
+                                held = true;
+                                break;
+                            }
+                        }
+                        toPush = held ? new List<QueueItem>() : waiting.Take(1).ToList();
+                    }
                     foreach (var q in toPush)
                         _runQueue.Remove(q);
                     hasActive = _activeIds.Count > 0;
@@ -1830,34 +1854,19 @@ public partial class LibraryView : UserControl
                         break;
                 }
                 foreach (var qi in toPush)
-                {
-                    if (_stop)
-                        break;
                     await PushOneAsync(qi);
-                    // Sequential gate (ticked = PS4 console): next game waits
-                    // until this one is downloaded AND installed.
-                    if (_m.SequentialMode && !_stop)
-                    {
-                        bool pushed;
-                        lock (_runLock) { pushed = _activeIds.ContainsKey(qi); }
-                        if (pushed)
-                            await WaitForInstallAsync(qi);
-                    }
-                }
                 MonitorTick();
                 await Task.Delay(1000);
             }
-            // Exited inner loop: either drained or stopped. Late arrivals
-            // (enqueued just now) must not get stranded: re-check atomically.
+            // Exited inner loop: drained. Late arrivals (enqueued just now)
+            // must not get stranded: re-check atomically.
             bool done;
-            List<QueueItem> leftovers = new();
-            List<string> revoked = new();
             lock (_runLock)
             {
                 // A queue of only paused rows is idle: the worker exits,
-                // Start restarts it.
+                // resume restarts it.
                 bool pending = _runQueue.Any(q => !q.IsPaused);
-                if (!_stop && (pending || _activeIds.Count > 0))
+                if (pending || _activeIds.Count > 0)
                 {
                     done = false;
                 }
@@ -1865,32 +1874,11 @@ public partial class LibraryView : UserControl
                 {
                     done = true;
                     _running = false;
-                    if (_stop)
-                    {
-                        leftovers.AddRange(_activeIds.Keys);
-                        foreach (var kv in _activeIds)
-                            revoked.Add(kv.Value);
-                        _activeIds.Clear();
-                        _activeIdle.Clear();
-                        _activeSince.Clear();
-                        _runQueue.Clear();
-                    }
                 }
             }
             if (done)
             {
-                // Real stop: pull the files from under the console so its
-                // in-flight download errors out instead of finishing quietly.
-                // (An already fully-downloaded install on the console side
-                // can't be recalled — that one will complete.)
-                foreach (var id in revoked)
-                    _server?.Revoke(id);
-                foreach (var qi in leftovers)
-                {
-                    var row = qi;
-                    Post(() => { row.State = "failed"; row.Message = "stopped"; row.CanResume = true; UpdateQueueLabel(); });
-                }
-                Post(() => _m.Status = _stop ? "Stopped." : "Queue finished.");
+                Post(() => _m.Status = "Queue finished.");
                 Post(() => _m.IsSending = false);
                 return;
             }
@@ -2000,6 +1988,7 @@ public partial class LibraryView : UserControl
                         {
                             item.State = "failed";
                             item.Message = reply4.Length > 120 ? reply4[..120] : reply4;
+                            item.CanResume = true;
                             _m.Status = $"PS4 {method4} push failed: {reply4}";
                             UpdateQueueLabel();
                         });
@@ -2026,6 +2015,7 @@ public partial class LibraryView : UserControl
                 {
                     item.State = "failed";
                     item.Message = reply.Length > 60 ? reply[..60] : reply;
+                    item.CanResume = true;
                     UpdateQueueLabel();
                 });
                 return;
@@ -2039,36 +2029,6 @@ public partial class LibraryView : UserControl
             item.Message = "queued on console…";
             UpdateQueueLabel();
         });
-    }
-
-    /// <summary>
-    /// One-by-one gate: wait until the console fully pulled the file, then
-    /// until /api/status reports idle (= install finished). Old receivers
-    /// without /api/status fall back to download-done. Honest timeouts so
-    /// a dead console never hangs the queue forever.
-    /// Stop-exits always fail the row (resumable) — never orphan it, so
-    /// Clear done can always remove it.
-    /// </summary>
-    private void FailStopped(QueueItem item, string msg)
-    {
-        Post(() =>
-        {
-            var row = item;
-            if (row.State == "sending" || row.State == "queued")
-            {
-                row.State = "failed";
-                row.Message = msg;
-                row.Speed = "";
-                row.CanResume = true;
-                UpdateQueueLabel();
-            }
-        });
-        lock (_runLock)
-        {
-            _activeIds.Remove(item);
-            _activeIdle.Remove(item);
-            _activeSince.Remove(item);
-        }
     }
 
     /// <summary>
@@ -2087,8 +2047,7 @@ public partial class LibraryView : UserControl
     /// Download-complete check with a 1 MiB short-count tolerance: the file
     /// server counts bytes only after a successful socket write, so a client
     /// disconnect on the last chunk can leave the counter up to one buffer
-    /// (1 MiB) short of a fully-downloaded file. Without the tolerance the
-    /// sequential gate waits forever and the queue never advances.
+    /// (1 MiB) short of a fully-downloaded file.
     /// </summary>
     private static bool IsDownloaded(long delta, long size)
     {
@@ -2112,207 +2071,10 @@ public partial class LibraryView : UserControl
         row.Message = message;
         row.IsSent = true;
         row.CanReorder = false;
-        lock (_runLock) { _stallSkips.Remove(row); }
         int i = _m.Queue.IndexOf(row);
         if (i >= 0 && i < _m.Queue.Count - 1)
             _m.Queue.Move(i, _m.Queue.Count - 1);
         UpdateQueueLabel();
-    }
-
-    /// <summary>Skip reasons for ParkSkip (stall accounting).</summary>
-    private const int MaxSkips = 3;
-    // Stall windows are short on purpose: a skipped row retries later
-    // (up to MaxSkips), so a false positive only reorders, never loses.
-    // Console-side pause = silence, so instant detection is impossible;
-    // ~30s of zero bytes is the practical minimum for "it's stuck".
-    private static readonly TimeSpan StallSkipAfter = TimeSpan.FromSeconds(3);
-    private static readonly TimeSpan NeverPulledSkipAfter = TimeSpan.FromSeconds(60);
-    private readonly Dictionary<QueueItem, int> _stallSkips = new();
-
-    /// <summary>
-    /// Park a stuck/paused row and let the queue move on: it goes back to
-    /// the end of _runQueue for a later retry instead of failing and
-    /// halting everything behind it. After MaxSkips stalls it really fails.
-    /// Call sites are worker threads; UI changes go through Post.
-    /// </summary>
-    private void ParkSkip(QueueItem item, string message, bool countSkip)
-    {
-        bool giveUp = false;
-        lock (_runLock)
-        {
-            _activeIds.Remove(item);
-            _activeIdle.Remove(item);
-            _activeSince.Remove(item);
-            if (countSkip)
-            {
-                _stallSkips.TryGetValue(item, out int n);
-                n++;
-                _stallSkips[item] = n;
-                giveUp = n >= MaxSkips;
-            }
-            if (!giveUp && !_runQueue.Contains(item))
-                _runQueue.Add(item);
-        }
-        Post(() =>
-        {
-            if (giveUp)
-            {
-                item.State = "failed";
-                item.Message = message + " — retry manually";
-                item.CanResume = true;
-            }
-            else
-            {
-                item.State = "queued";
-                item.Message = message;
-                item.Speed = "";
-                item.CanResume = false;
-            }
-            UpdateQueueLabel();
-        });
-    }
-
-    private async Task WaitForInstallAsync(QueueItem item)
-    {
-        string id;
-        lock (_runLock)
-        {
-            if (!_activeIds.TryGetValue(item, out id!))
-                return;
-        }
-        // PS4 consoles (RPI/etaHEN/GoldHEN) have no /api/status with our
-        // busy semantics — never poll it there, or the queue stalls.
-        bool isPs4 = item.Game.IsPs4 || (item.Game.Platform ?? "").StartsWith("PS4");
-        long size = item.Game.SizeBytes;
-        DateTime pushedAt = DateTime.UtcNow;
-        DateTime lastProgress = DateTime.UtcNow;
-        long lastDelta = 0;
-        for (;;)
-        {
-            if (_stop)
-            {
-                FailStopped(item, "stopped");
-                return;
-            }
-            if (item.IsPaused)
-            {
-                // App-side pause parks the row (no fail): the queue moves on
-                // to the next game, this one retries when unpaused.
-                ParkSkip(item, "paused — skipped for now", countSkip: false);
-                return;
-            }
-            long delta = _server!.ServedFor(id);
-            var row = item;
-            string rsp = delta == 0 ? "" : TrackRowSpeed(item, delta);
-            Post(() =>
-            {
-                if (row.State == "sending")
-                {
-                    row.Percent = size <= 0 ? 100 : Math.Min(100, delta * 100.0 / size);
-                    row.Message = delta == 0
-                        ? "queued on console…"
-                        : $"{Program.FormatSize(delta)} / {Program.FormatSize(size)}";
-                    row.Speed = rsp;
-                }
-            });
-            if (IsDownloaded(delta, size))
-                break;
-            if (delta != lastDelta)
-            {
-                lastDelta = delta;
-                lastProgress = DateTime.UtcNow;
-            }
-            if (delta == 0 && (DateTime.UtcNow - pushedAt) >= NeverPulledSkipAfter)
-            {
-                // Console never pulled (push missed / console-side pause):
-                // skip to the next game, retry this one later.
-                ParkSkip(item, "console never pulled it — retrying later", countSkip: true);
-                return;
-            }
-            if (delta > 0 && (DateTime.UtcNow - lastProgress) >= StallSkipAfter)
-            {
-                ParkSkip(item, "download stalled — retrying later", countSkip: true);
-                return;
-            }
-            await Task.Delay(1000);
-        }
-        // Downloaded — now wait for the install itself to finish.
-        // PS4 has no status endpoint: give the console a moment to start
-        // the install, then let the next push land.
-        DateTime t0 = DateTime.UtcNow;
-        bool wasBusy = false;
-        bool confirmed = false;
-        bool supported = !isPs4;
-        if (supported)
-        for (;;)
-        {
-            if (_stop)
-            {
-                FailStopped(item, "stopped");
-                return;
-            }
-            if (item.IsPaused)
-            {
-                ParkSkip(item, "paused — skipped for now", countSkip: false);
-                return;
-            }
-            bool busy;
-            (supported, busy) = await ConsoleClient.GetStatusAsync(_m.PsIp);
-            if (!supported)
-                break; // old receiver / DPI: download-done is all we can know
-            if (busy)
-                wasBusy = true;
-            else if (wasBusy)
-            {
-                confirmed = true;
-                break; // was installing, now idle = finished
-            }
-            else if ((DateTime.UtcNow - t0).TotalMinutes >= 5)
-                break; // never reported busy — don't hang the queue
-            if ((DateTime.UtcNow - t0).TotalHours >= 3)
-                break;
-            Post(() =>
-            {
-                if (item.State == "sending" || item.State == "sent")
-                    item.Message = "installing on console…";
-            });
-            await Task.Delay(3000);
-        }
-        if (!supported && !_stop)
-        {
-            // No status endpoint (e.g. PS4 DPI): give the console a moment
-            // to start the install before the next push lands.
-            Post(() =>
-            {
-                if (item.State == "sending" || item.State == "sent")
-                    item.Message = "sent — install starting on console…";
-            });
-            for (int i = 0; i < 10 && !_stop; i++)
-                await Task.Delay(1000);
-        }
-        Post(() =>
-        {
-            var row = item;
-            if (row.State == "failed")
-                return;
-            if (_stop && !confirmed)
-            {
-                row.State = "failed";
-                row.Message = "stopped";
-                row.CanResume = true;
-            }
-            else
-            {
-                MarkSent(row, confirmed ? "installed ✓ (check console)" : "sent to console queue");
-            }
-                lock (_runLock)
-                {
-                    _activeIds.Remove(row);
-                    _activeIdle.Remove(row);
-                    _activeSince.Remove(row);
-                }
-                UpdateQueueLabel();
-        });
     }
 
     private static string FormatEta(double seconds)
@@ -2386,6 +2148,7 @@ public partial class LibraryView : UserControl
         lock (_runLock)
         {
             _speedSamples.Remove(item);
+                _stallSince.Remove(item);
         }
     }
 
@@ -2403,6 +2166,7 @@ public partial class LibraryView : UserControl
         }
         var done = new List<QueueItem>();
         var giveUp = new List<QueueItem>();
+        var stalled = new List<QueueItem>();
         long totalSize = 0, totalServed = 0;
         foreach (var (item, id, _, _) in snap)
         {
@@ -2424,9 +2188,16 @@ public partial class LibraryView : UserControl
                     _activeIdle[item] = 0;
                     if (delta == 0 && (DateTime.UtcNow - _activeSince[item]).TotalMinutes >= 30)
                         giveUp.Add(item);
+                    else if (delta > 0)
+                    {
+                        if (!_stallSince.TryGetValue(item, out var st) || st.Bytes != delta)
+                            _stallSince[item] = (DateTime.UtcNow, delta);
+                        else if ((DateTime.UtcNow - st.T).TotalMinutes >= 10)
+                            stalled.Add(item);
+                    }
                 }
             }
-            if (!done.Contains(item) && !giveUp.Contains(item))
+            if (!done.Contains(item) && !giveUp.Contains(item) && !stalled.Contains(item))
             {
                 var row = item;
                 string rsp = delta == 0 ? "" : TrackRowSpeed(item, delta);
@@ -2440,7 +2211,7 @@ public partial class LibraryView : UserControl
                 });
             }
         }
-        if (done.Count == 0 && giveUp.Count == 0)
+        if (done.Count == 0 && giveUp.Count == 0 && stalled.Count == 0)
         {
             UpdateEta(snap.Count, totalSize, totalServed);
             PassiveProgressTick();
@@ -2448,12 +2219,14 @@ public partial class LibraryView : UserControl
         }
         lock (_runLock)
         {
-            foreach (var item in done.Concat(giveUp))
+            foreach (var item in done.Concat(giveUp).Concat(stalled))
             {
                 _activeIds.Remove(item);
                 _activeIdle.Remove(item);
                 _activeSince.Remove(item);
+                _stallSince.Remove(item);
                 _speedSamples.Remove(item);
+                _stallSince.Remove(item);
             }
         }
         foreach (var item in done)
@@ -2468,6 +2241,17 @@ public partial class LibraryView : UserControl
             {
                 row.State = "failed";
                 row.Message = "console never pulled it";
+                row.CanResume = true;
+                UpdateQueueLabel();
+            });
+        }
+        foreach (var item in stalled)
+        {
+            var row = item;
+            Post(() =>
+            {
+                row.State = "failed";
+                row.Message = "download stalled on console — ⟳ Reinstall to retry";
                 row.CanResume = true;
                 UpdateQueueLabel();
             });

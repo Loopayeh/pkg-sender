@@ -174,7 +174,6 @@ installer_init(void)
 			return -2;
 		}
 	}
-	notify_user("Loopayeh: init AppInstUtil...");
 	rc = p_init();
 	if (rc == 0)
 		g_inst_ready = 1;
@@ -193,7 +192,7 @@ installer_init(void)
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
 /* bump on every behavior change; the page shows receiver vs page tags */
-#define RECEIVER_BUILD "20260920-17"
+#define RECEIVER_BUILD "20260920-18"
 
 __asm__(
 ".section .rodata\n"
@@ -265,8 +264,7 @@ launcher_install_if_needed(void)
 			return; /* already installed */
 	}
 	if (installer_init() != 0) {
-		notify_user("Loopayeh: launcher skipped (AppInstUtil off)");
-		return;
+		return; /* AppInstUtil off: installs fail with their own toast */
 	}
 	snprintf(sdir, sizeof(sdir), "%s/sce_sys", dir);
 	if ((mkdir(dir, 0755) != 0 && errno != EEXIST) ||
@@ -2472,8 +2470,6 @@ main(void)
 	int opt = 1;
 	struct sockaddr_in sa;
 
-	notify_user("Loopayeh: stage main entered");
-
 	syscall(SYS_thr_set_name, -1, RECEIVER_NAME);
 
 	/* replace any previous instance: re-inject needs no reboot */
@@ -2487,7 +2483,6 @@ main(void)
 	}
 
 	srv = socket(AF_INET, SOCK_STREAM, 0);
-	notify_user("Loopayeh: stage socket done");
 	if (srv < 0) {
 		notify_user("Loopayeh: socket failed, exiting");
 		return 1;
