@@ -1046,8 +1046,8 @@ static volatile long long g_pull_want = -1;
 static char g_pull_name[128];
 
 /* 0 = ok, 1 = skipped (same size present), -1 = error */
-#define PULL_SEGS 8
-#define PULL_CHUNK (256 * 1024)
+#define PULL_SEGS 16
+#define PULL_CHUNK (1024 * 1024)
 
 typedef struct pull_seg {
 	char host[256];
@@ -1083,7 +1083,7 @@ pull_connect(const char *host, const char *portstr)
 	freeaddrinfo(res);
 	if (s >= 0) {
 		struct timeval tv;
-		int rcv = 1024 * 1024;
+		int rcv = 4 * 1024 * 1024;
 
 		tv.tv_sec = 30;
 		tv.tv_usec = 0;
