@@ -1700,6 +1700,26 @@ handle_client(int fd)
 		close(fd);
 		return;
 	}
+	/* absolute-form URIs (proxied browsers send
+	 * "GET http://host:port/path?query HTTP/1.1"): strip to origin-form. */
+	{
+		const char *abs = NULL;
+
+		if (!strncmp(path, "http://", 7))
+			abs = strchr(path + 7, '/');
+		else if (!strncmp(path, "https://", 8))
+			abs = strchr(path + 8, '/');
+		if (abs && abs != path)
+			memmove(path, abs, strlen(abs) + 1);
+		else if (!strncmp(path, "http://", 7) ||
+		    !strncmp(path, "https://", 8)) {
+			strcpy(path, "/"); /* "http://host" with no path */
+		} else if (path[0] == '\0' || path[0] != '/') {
+			free(buf);
+			close(fd);
+			return;
+		}
+	}
 
 #ifdef TEST_ONLY
 	/* test build: probes + beacon stay alive, everything that can
