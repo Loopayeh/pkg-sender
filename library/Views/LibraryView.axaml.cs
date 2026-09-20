@@ -1354,21 +1354,29 @@ public partial class LibraryView : UserControl
                     }
                     DateTime now = DateTime.UtcNow;
                     double dt = (now - lastT).TotalSeconds;
-                    string spd = dt > 0.5 && got >= lastGot
-                        ? " • " + FormatSpeed((got - lastGot) / dt)
-                        : "";
+                    double bps = dt > 0.5 && got >= lastGot ? (got - lastGot) / dt : -1;
                     lastGot = got;
                     lastT = now;
                     row.Percent = want > 0 ? Math.Min(100, got * 100.0 / want) : 0;
                     row.Message = isPaused ? "paused" : want > 0
-                        ? $"{Program.FormatSize(got)} / {Program.FormatSize(want)}{spd}"
-                        : $"{Program.FormatSize(got)}{spd}";
+                        ? $"{Program.FormatSize(got)} / {Program.FormatSize(want)}"
+                        : $"{Program.FormatSize(got)}";
+                    // Live speed lives in the bottom bar (same as PKG installs).
+                    if (isPaused)
+                        Post(() => { _m.SpeedText = "paused"; _m.EtaText = ""; });
+                    else if (bps >= 0)
+                    {
+                        string eta = bps > 0 && want > got ? FormatEta((want - got) / bps) : "";
+                        string spd = FormatSpeed(bps);
+                        Post(() => { _m.SpeedText = spd; _m.EtaText = eta; });
+                    }
                 }
                 if (row.State == "copying" && _m.Queue.Contains(row))
                 {
                     row.State = "failed";
                     row.Message = "stalled — retry Copy images";
                 }
+                ClearCopySpeed();
                 UpdateQueueLabel();
             }
             else
@@ -1846,6 +1854,21 @@ public partial class LibraryView : UserControl
         if (bps >= 1024)
             return $"{bps / 1024:F0} KB/s";
         return $"{bps:F0} B/s";
+    }
+
+    /// <summary>
+    /// Release the bottom speed bar after a copy ends — but never steal it
+    /// from a running PKG install (its MonitorTick owns the bar then).
+    /// </summary>
+    private void ClearCopySpeed()
+    {
+        bool installActive;
+        lock (_runLock)
+        {
+            installActive = _activeIds.Count > 0;
+        }
+        if (!installActive)
+            Post(() => { _m.SpeedText = ""; _m.EtaText = ""; });
     }
 
     // Per-row speed samples (sliding ~3s window). Guarded by _runLock.
