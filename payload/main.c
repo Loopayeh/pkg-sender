@@ -648,6 +648,153 @@ fs_jail(const char *in, char *out, size_t sz)
 	return 0;
 }
 
+/* ── USB sources: /mnt/usb0..7 are browsable and copyable-from,
+ * never written (read-only sticks stay safe). */
+static int
+fs_usb_src(const char *in, char *out, size_t sz)
+{
+	if (!in || strlen(in) + 1 > sz)
+		return -1;
+	if (strncmp(in, "/mnt/usb", 8) != 0)
+		return -1;
+	if (in[8] < '0' || in[8] > '7')
+		return -1;
+	if (in[9] != '\0' && in[9] != '/')
+		return -1;
+	if (strstr(in, ".."))
+		return -1;
+	strcpy(out, in);
+	return 0;
+}
+
+/* readable source: /data anywhere, or a USB stick */
+static int
+fs_src_jail(const char *in, char *out, size_t sz)
+{
+	if (fs_jail(in, out, sz) == 0)
+		return 0;
+	return fs_usb_src(in, out, sz);
+}
+
+/* join dir + name safely; 0 ok, -1 truncates */
+static int
+fs_join(char *dst, size_t sz, const char *dir, const char *name)
+{
+	int n = snprintf(dst, sz, "%s/%s", dir, name);
+
+	return (n > 0 && (size_t)n < sz) ? 0 : -1;
+}
+
+/* recursive delete (files + dirs). best-effort: 0 ok, -1 on first error */
+static int
+fs_rm_r(const char *path)
+{
+	struct stat st;
+	DIR *d;
+	struct dirent *e;
+
+	if (lstat(path, &st) != 0)
+		return -1;
+	if (!S_ISDIR(st.st_mode))
+		return unlink(path);
+	d = opendir(path);
+	if (!d)
+		return -1;
+	while ((e = readdir(d)) != NULL) {
+		char full[PATH_MAX_V];
+
+		if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+			continue;
+		if (fs_join(full, sizeof(full), path, e->d_name) != 0) {
+			closedir(d);
+			return -1;
+		}
+		if (fs_rm_r(full) != 0) {
+			closedir(d);
+			return -1;
+		}
+	}
+	closedir(d);
+	return rmdir(path);
+}
+
+/* copy one regular file, overwriting dst */
+static int
+fs_copy_file(const char *src, const char *dst)
+{
+	char *hb = malloc(256 * 1024);
+	int in = -1, out = -1, rc = -1;
+	ssize_t n;
+
+	if (!hb)
+		return -1;
+	in = open(src, O_RDONLY);
+	if (in < 0)
+		goto out;
+	out = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (out < 0)
+		goto out;
+	rc = 0;
+	for (;;) {
+		n = read(in, hb, 256 * 1024);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			rc = -1;
+			break;
+		}
+		if (n == 0)
+			break;
+		if (write(out, hb, (size_t)n) != n) {
+			rc = -1;
+			break;
+		}
+	}
+out:
+	free(hb);
+	if (in >= 0)
+		close(in);
+	if (out >= 0)
+		close(out);
+	return rc;
+}
+
+/* recursive copy src -> dst (dst may exist when merging dirs) */
+static int
+fs_copy_r(const char *src, const char *dst)
+{
+	struct stat st;
+	DIR *d;
+	struct dirent *e;
+
+	if (stat(src, &st) != 0)
+		return -1;
+	if (!S_ISDIR(st.st_mode))
+		return fs_copy_file(src, dst);
+	if (mkdir(dst, 0755) != 0 && errno != EEXIST)
+		return -1;
+	d = opendir(src);
+	if (!d)
+		return -1;
+	while ((e = readdir(d)) != NULL) {
+		char fsrc[PATH_MAX_V], fdst[PATH_MAX_V];
+
+		if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+			continue;
+		if (fs_join(fsrc, sizeof(fsrc), src, e->d_name) != 0 ||
+		    fs_join(fdst, sizeof(fdst), dst, e->d_name) != 0) {
+			closedir(d);
+			return -1;
+		}
+		if (fs_copy_r(fsrc, fdst) != 0) {
+			closedir(d);
+			return -1;
+		}
+	}
+	closedir(d);
+	return 0;
+}
+
 /* escape " \ and C0 controls for JSON */
 static void
 json_escape(const char *src, char *dst, size_t dst_sz)
@@ -833,13 +980,14 @@ static const char UI_HTML[] =
 ".member div:first-child{flex:1}"
 ".rb{font-size:10px;color:#171717;background:#4F8EF7;border-radius:4px;padding:2px 6px;margin-right:6px}"
 ".member button{padding:8px 12px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer}"
-"#msg,#fmsg{margin-top:14px;font-size:13px;color:#8B93A5;min-height:20px}"
-"#crumb,#mkrow{display:flex;gap:8px;margin-bottom:12px;align-items:center}"
-"#fpath{font-size:13px;color:#8B93A5}"
-".frow{display:flex;gap:8px;align-items:center;background:#202020;border-radius:8px;padding:10px;margin-bottom:8px}"
-".frow div:first-child{flex:1;font-size:14px}"
-".frow .m{font-size:11px;color:#8B93A5}"
-".frow div:last-child{display:flex;gap:6px}</style></head><body>"
+"#msg,#fmsg{margin-top:14px;font-size:15px;color:#8B93A5;min-height:24px}"
+"#crumb,#mkrow,#usbrow{display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap}"
+"#fpath{font-size:15px;color:#8B93A5}"
+".frow{display:flex;gap:10px;align-items:center;background:#202020;border-radius:8px;padding:14px;margin-bottom:10px}"
+".frow div:first-child{flex:1;font-size:17px}"
+".frow .m{font-size:13px;color:#8B93A5}"
+".frow div:last-child{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}"
+".frow button{font-size:15px;padding:10px 14px}</style></head><body>"
 
 "<h2>pkg remote installer</h2>"
 "form#mf{display:flex;flex-direction:column;gap:12px;width:90%;max-width:520px;margin:0 auto}</style></head><body>"
@@ -853,6 +1001,11 @@ static const char UI_HTML[] =
 "<div id=kind><button data-k=games class=on>Games</button><button data-k=images>Images</button></div>"
 "<div id=grid></div><div id=msg></div></div>"
 "<div id=files style='display:none'>"
+"<div id=usbrow><button class=gh data-u='/data'>Data</button>"
+"<button class=gh data-u='/mnt/usb0'>USB0</button>"
+"<button class=gh data-u='/mnt/usb1'>USB1</button>"
+"<button class=gh data-u='/mnt/usb2'>USB2</button>"
+"<button class=gh data-u='/mnt/usb3'>USB3</button></div>"
 "<div id=crumb><button class=gh id=up>Up</button><span id=fpath>/data</span></div>"
 "<div id=mkrow><input id=mkname placeholder='New folder name'><button class=go id=mkbtn>New folder</button></div>"
 "<div id=flist></div><div id=fmsg></div></div>"
@@ -965,11 +1118,32 @@ static const char UI_HTML[] =
 "var sub=e.dir?'':(' &middot; '+fmtSize(e.size));"
 "d.innerHTML='<div><span>'+ic+'</span> '+esc(e.name)+'<div class=m>'+(e.dir?'folder':('file'+sub))+'</div></div>';"
 "var w=document.createElement('div');"
-"if(e.dir){var o=document.createElement('button');o.className='gh';o.textContent='Open';"
-"o.onclick=function(){fpath=fpath+'/'+e.name;fsLoad();};w.appendChild(o);}"
-"var del=document.createElement('button');del.className='danger';del.textContent='Delete';"
-"del.onclick=function(){if(confirm('Delete '+e.name+'?'))fsDel(e.name);};w.appendChild(del);"
+"function mkb(t,cls,fn){var b=document.createElement('button');b.className=cls;b.textContent=t;b.onclick=fn;w.appendChild(b);}"
+"if(e.dir)mkb('Open','gh',function(){fpath=fpath+'/'+e.name;fsLoad();});"
+"mkb('Info','gh',function(){fsInfo(e.name);});"
+"mkb('Copy','gh',function(){fsCopy(e.name,e.dir);});"
+"mkb('Move','gh',function(){fsMove(e.name);});"
+"mkb('Rename','gh',function(){fsRename(e.name);});"
+"mkb('Delete','danger',function(){if(confirm('Delete '+e.name+(e.dir?' (with everything inside)?':'?')))fsDel(e.name);});"
 "d.appendChild(w);return d;}"
+"async function fsApi(ep,obj){var fm=document.getElementById('fmsg');"
+"try{var r=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});"
+"var x=await r.text();fm.textContent=x;if(x.indexOf('ok')>=0)fsLoad();}"
+"catch(ex){fm.textContent='Error: '+ex;}}"
+"async function fsRename(name){var nn=prompt('Rename to:',name);"
+"if(!nn||nn===name)return;"
+"fsApi('/api/fs/rename',{from:fpath+'/'+name,to:fpath+'/'+nn});}"
+"async function fsCopy(name,isDir){var dst=prompt('Copy to folder:',fpath);"
+"if(!dst)return;"
+"fsApi('/api/fs/copy',{src:fpath+'/'+name,dst:dst+'/'+name});}"
+"async function fsMove(name){var dst=prompt('Move to folder:',fpath);"
+"if(!dst||dst===fpath)return;"
+"fsApi('/api/fs/move',{src:fpath+'/'+name,dst:dst+'/'+name});}"
+"async function fsInfo(name){var fm=document.getElementById('fmsg');"
+"try{var r=await fetch('/api/fs/info?path='+encodeURIComponent(fpath+'/'+name));"
+"var j=await r.json();"
+"fm.textContent=j.name+' • '+j.kind+' • '+fmtSize(j.size)+' • '+j.magic;}"
+"catch(ex){fm.textContent='Error: '+ex;}}"
 "async function fsLoad(){var fp=document.getElementById('fpath');fp.textContent=fpath;"
 "var fl=document.getElementById('flist');var fm=document.getElementById('fmsg');"
 "fm.textContent='Loading...';fl.innerHTML='';"
@@ -992,7 +1166,10 @@ static const char UI_HTML[] =
 "catch(ex){fm.textContent='Error: '+ex;}}"
 "document.getElementById('save').onclick=load;"
 "document.getElementById('mkbtn').onclick=fsMkdir;"
-"document.getElementById('up').onclick=function(){if(fpath!=='/data'){var i=fpath.lastIndexOf('/');fpath=i>0?fpath.substring(0,i):'/data';fsLoad();}};"
+"document.getElementById('up').onclick=function(){var roots=['/data','/mnt/usb0','/mnt/usb1','/mnt/usb2','/mnt/usb3'];"
+"if(roots.indexOf(fpath)>=0)return;var i=fpath.lastIndexOf('/');fpath=i>0?fpath.substring(0,i):'/data';fsLoad();};"
+"var ub=document.getElementById('usbrow').children;"
+"for(var u=0;u<ub.length;u++)(function(c){c.onclick=function(){fpath=c.getAttribute('data-u');fsLoad();};})(ub[u]);"
 "qEl.oninput=render;"
 "var chips=document.getElementById('chips').children;"
 "for(var i=0;i<chips.length;i++)(function(c){c.onclick=function(){plat=c.getAttribute('data-p');"
@@ -1650,7 +1827,7 @@ handle_client(int fd)
 		int truncated = 0;
 
 		if (!query_param(path, "path", rpath, sizeof(rpath)) ||
-		    fs_jail(rpath, local, sizeof(local)) != 0) {
+		    fs_src_jail(rpath, local, sizeof(local)) != 0) {
 			send_text(fd, "error:bad path");
 		} else if (!(dp = opendir(local))) {
 			send_text(fd, "error:not a directory");
@@ -1735,6 +1912,118 @@ handle_client(int fd)
 				send_json(fd, json);
 				free(json);
 			}
+		}
+	} else if (!strcmp(method, "GET") &&
+	           !strncmp(path, "/api/fs/info", 13)) {
+		char rpath[PATH_MAX_V], local[PATH_MAX_V];
+		char escname[512];
+		struct stat st;
+		const char *slash, *dot, *kind = "file";
+		char magic[33] = "";
+		char out[1024];
+
+		if (!query_param(path, "path", rpath, sizeof(rpath)) ||
+		    fs_src_jail(rpath, local, sizeof(local)) != 0) {
+			send_text(fd, "error:bad path");
+		} else if (stat(local, &st) != 0) {
+			send_text(fd, "error:not found");
+		} else {
+			if (S_ISDIR(st.st_mode)) {
+				kind = "folder";
+			} else {
+				int f = open(local, O_RDONLY);
+				if (f >= 0) {
+					unsigned char hb[16];
+					ssize_t n = read(f, hb, sizeof(hb));
+					int i;
+					for (i = 0; i < n; i++)
+						snprintf(magic + i * 2, 3, "%02x", hb[i]);
+					close(f);
+				}
+				slash = strrchr(local, '/');
+				dot = strrchr(slash ? slash : local, '.');
+				if (dot) {
+					if (!strcasecmp(dot, ".pkg"))
+						kind = "pkg";
+					else if (!strcasecmp(dot, ".exfat") ||
+					    !strcasecmp(dot, ".ffpkg") ||
+					    !strcasecmp(dot, ".ffpfsc"))
+						kind = "image";
+					else if (!strcasecmp(dot, ".elf"))
+						kind = "elf";
+					else if (!strcasecmp(dot, ".png") ||
+					    !strcasecmp(dot, ".jpg") ||
+					    !strcasecmp(dot, ".jpeg"))
+						kind = "picture";
+					else if (!strcasecmp(dot, ".json"))
+						kind = "json";
+				}
+			}
+			slash = strrchr(local, '/');
+			json_escape(slash ? slash + 1 : local, escname, sizeof(escname));
+			snprintf(out, sizeof(out),
+			    "{\"name\":\"%s\",\"kind\":\"%s\",\"size\":%lld,"
+			    "\"mtime\":%lld,\"magic\":\"%s\"}",
+			    escname, kind,
+			    S_ISDIR(st.st_mode) ? 0 : (long long)st.st_size,
+			    (long long)st.st_mtime, magic);
+			send_json(fd, out);
+		}
+	} else if (!strcmp(method, "POST") &&
+	           !strncmp(path, "/api/fs/rename", 15)) {
+		char rfrom[PATH_MAX_V], rto[PATH_MAX_V];
+		char from[PATH_MAX_V], to[PATH_MAX_V];
+
+		if (!json_string(body, "from", rfrom, sizeof(rfrom)) ||
+		    !json_string(body, "to", rto, sizeof(rto)) ||
+		    fs_jail(rfrom, from, sizeof(from)) != 0 ||
+		    fs_jail(rto, to, sizeof(to)) != 0) {
+			send_text(fd, "error:bad path");
+		} else if (!strcmp(from, to)) {
+			send_text(fd, "error:same path");
+		} else if (!strcmp(to, FS_ROOT)) {
+			send_text(fd, "error:bad path");
+		} else if (rename(from, to) == 0) {
+			send_json(fd, "{\"ok\":true}");
+		} else {
+			send_text(fd, "error:rename failed");
+		}
+	} else if (!strcmp(method, "POST") &&
+	           !strncmp(path, "/api/fs/copy", 13)) {
+		char rsrc[PATH_MAX_V], rdst[PATH_MAX_V];
+		char src[PATH_MAX_V], dst[PATH_MAX_V];
+
+		if (!json_string(body, "src", rsrc, sizeof(rsrc)) ||
+		    !json_string(body, "dst", rdst, sizeof(rdst)) ||
+		    fs_src_jail(rsrc, src, sizeof(src)) != 0 ||
+		    fs_jail(rdst, dst, sizeof(dst)) != 0) {
+			send_text(fd, "error:bad path");
+		} else if (!strcmp(dst, FS_ROOT)) {
+			send_text(fd, "error:bad path");
+		} else if (fs_copy_r(src, dst) == 0) {
+			send_json(fd, "{\"ok\":true}");
+		} else {
+			send_text(fd, "error:copy failed");
+		}
+	} else if (!strcmp(method, "POST") &&
+	           !strncmp(path, "/api/fs/move", 13)) {
+		char rsrc[PATH_MAX_V], rdst[PATH_MAX_V];
+		char src[PATH_MAX_V], dst[PATH_MAX_V];
+
+		if (!json_string(body, "src", rsrc, sizeof(rsrc)) ||
+		    !json_string(body, "dst", rdst, sizeof(rdst)) ||
+		    fs_src_jail(rsrc, src, sizeof(src)) != 0 ||
+		    fs_jail(rdst, dst, sizeof(dst)) != 0) {
+			send_text(fd, "error:bad path");
+		} else if (!strcmp(dst, FS_ROOT)) {
+			send_text(fd, "error:bad path");
+		} else if (rename(src, dst) == 0) {
+			send_json(fd, "{\"ok\":true}");
+		} else if (errno == EXDEV && fs_copy_r(src, dst) == 0 &&
+		    fs_rm_r(src) == 0) {
+			send_json(fd, "{\"ok\":true}");
+		} else {
+			send_text(fd, "error:move failed");
 		}
 	} else if (!strcmp(method, "GET")) {
 		send_html(fd, UI_HTML);
@@ -1871,10 +2160,10 @@ handle_client(int fd)
 		} else if (stat(local, &st) != 0) {
 			send_text(fd, "error:not found");
 		} else if (S_ISDIR(st.st_mode)) {
-			if (rmdir(local) == 0) {
+			if (fs_rm_r(local) == 0) {
 				send_json(fd, "{\"ok\":true}");
 			} else {
-				send_text(fd, "error:not empty");
+				send_text(fd, "error:delete failed");
 			}
 		} else {
 			if (unlink(local) == 0) {
