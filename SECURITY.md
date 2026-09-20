@@ -1,12 +1,5 @@
 # Security Policy
 
-## Supported Versions
-
-| Version | Supported |
-| ------- | --------- |
-| 1.0.x   | ✅ |
-| < 1.0   | ❌ |
-
 ## Reporting a Vulnerability
 
 Please **do not** open a public issue for security problems.
