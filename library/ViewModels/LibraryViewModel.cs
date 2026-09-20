@@ -16,6 +16,8 @@ public sealed class GameItem : ReactiveObject
     public string Format { get; init; } = "pkg";
     public bool IsFolder { get; init; }
     public string ContentId { get; init; } = "";
+    public string TitleId { get; init; } = "";
+    public string Version { get; init; } = "";
     public Bitmap? Cover { get; init; }
     public bool HasCover { get; init; }
     public bool NoCover => !HasCover;

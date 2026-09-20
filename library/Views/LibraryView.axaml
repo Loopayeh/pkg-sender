@@ -74,7 +74,7 @@
                     VerticalAlignment="Center" Foreground="#8B93A5" FontSize="12"
                     ToolTip.Tip="Show only base games — click 🔗×N on a card to see its updates/DLCs"/>
         </Grid>
-        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto,Auto">
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto,Auto,Auto">
           <Grid Grid.Column="0" Margin="0,0,8,0">
             <TextBox Text="{Binding Search, Mode=TwoWay}" Watermark="🔍 Search title, ID…" Padding="10,8,36,8"/>
             <Button Content="✕" Name="BtnClearSearch" HorizontalAlignment="Right" VerticalAlignment="Center"
@@ -82,8 +82,11 @@
                     FontSize="11" Foreground="#8B93A5" ToolTip.Tip="Back to full library"/>
           </Grid>
           <Button Grid.Column="1" Content="Send PKG" Name="BtnSend" MinWidth="150" FontWeight="Bold" Margin="0,0,8,0" IsEnabled="False" ToolTip.Tip="Send selected .pkg files to the console downloader"/>
-          <Button Grid.Column="2" Content="■ Stop" Name="BtnStop" Margin="0,0,8,0" ToolTip.Tip="Stop the running queue (keeps the rows)"/>
-          <Button Grid.Column="3" Content="Clear done" Name="BtnClearDone" ToolTip.Tip="Remove finished rows only — never touches active downloads"/>
+          <CheckBox Grid.Column="2" Content="Publish library" Name="PublishCheck" Margin="0,0,8,0"
+                    VerticalAlignment="Center" Foreground="#8B93A5" FontSize="12"
+                    ToolTip.Tip="Publish the scanned PKG library for the console browser (pkg remote installer): the console pulls the list + covers itself"/>
+          <Button Grid.Column="3" Content="■ Stop" Name="BtnStop" Margin="0,0,8,0" ToolTip.Tip="Stop the running queue (keeps the rows)"/>
+          <Button Grid.Column="4" Content="Clear done" Name="BtnClearDone" ToolTip.Tip="Remove finished rows only — never touches active downloads"/>
         </Grid>
       </Grid>
     </Border>

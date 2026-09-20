@@ -16,6 +16,17 @@ namespace LoopDPI.Core;
 /// Serves one file (/pkg) or a set of files (/pkg/{id}).
 /// Reports served bytes for progress bars.
 /// </summary>
+/// <summary>One library row for the console browser catalog (PKG only).</summary>
+public sealed class CatalogEntry
+{
+    public string Id { get; init; } = "";
+    public string Title { get; init; } = "";
+    public string TitleId { get; init; } = "";
+    public string Version { get; init; } = "";
+    public long Size { get; init; }
+    public bool HasIcon { get; init; }
+}
+
 public sealed class RangeFileServer : IDisposable
 {
     private readonly TcpListener _listener;
@@ -62,6 +73,9 @@ public sealed class RangeFileServer : IDisposable
     /// <summary>Serve one game's in-memory cover PNG to the console installer UI.</summary>
     public void RegisterIcon(string id, byte[] png) => _icons[id] = png;
     public string IconUrlFor(string host, string id) => $"http://{host}:{Port}/icon/{Uri.EscapeDataString(id)}";
+    /// <summary>Library rows served at GET /catalog (set by Publish library).</summary>
+    public Func<IReadOnlyList<CatalogEntry>>? CatalogProvider { get; set; }
+    public string CatalogUrlFor(string host) => $"http://{host}:{Port}/catalog";
 
     public void Start()
     {
@@ -142,6 +156,51 @@ public sealed class RangeFileServer : IDisposable
             }
             bool isHead = method == "HEAD";
             string noQuery = rawTarget.Split('?')[0];
+            // /catalog: JSON library for the console browser (PKG only).
+            if (noQuery.Equals("/catalog", StringComparison.OrdinalIgnoreCase))
+            {
+                string json = "[]";
+                try
+                {
+                    var rows = CatalogProvider?.Invoke();
+                    if (rows != null)
+                    {
+                        var sb2 = new StringBuilder("[");
+                        bool firstRow = true;
+                        foreach (var r in rows)
+                        {
+                            if (!firstRow)
+                                sb2.Append(',');
+                            firstRow = false;
+                            sb2.Append("{\"id\":\"").Append(JsonEscape(r.Id)).Append('"');
+                            sb2.Append(",\"title\":\"").Append(JsonEscape(r.Title)).Append('"');
+                            sb2.Append(",\"titleId\":\"").Append(JsonEscape(r.TitleId)).Append('"');
+                            sb2.Append(",\"version\":\"").Append(JsonEscape(r.Version)).Append('"');
+                            sb2.Append(",\"size\":").Append(r.Size);
+                            sb2.Append(",\"hasIcon\":").Append(r.HasIcon ? "true" : "false");
+                            sb2.Append('}');
+                        }
+                        sb2.Append(']');
+                        json = sb2.ToString();
+                    }
+                }
+                catch
+                {
+                }
+                var jb = Encoding.UTF8.GetBytes(json);
+                await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nContent-Length: {jb.Length}\r\nConnection: close\r\n\r\n", ct);
+                if (!isHead)
+                {
+                    try
+                    {
+                        await ns.WriteAsync(jb, ct);
+                    }
+                    catch
+                    {
+                    }
+                }
+                return;
+            }
             // /icon/{id}: small in-memory cover PNG for the console installer UI.
             if (noQuery.StartsWith("/icon/", StringComparison.OrdinalIgnoreCase))
             {
@@ -280,6 +339,9 @@ public sealed class RangeFileServer : IDisposable
             }
         }
     }
+
+    private static string JsonEscape(string s) =>
+        s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");
 
     private static async Task WriteRaw(NetworkStream ns, string s, CancellationToken ct)
     {

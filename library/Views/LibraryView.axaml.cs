@@ -159,6 +159,8 @@ public partial class LibraryView : UserControl
             }
             _m.Status = "Stopping…";
         };
+        this.FindControl<CheckBox>("PublishCheck").Checked += (_, _) => SetPublish(true);
+        this.FindControl<CheckBox>("PublishCheck").Unchecked += (_, _) => SetPublish(false);
         this.FindControl<Button>("BtnClearDone").Click += (_, _) =>
         {
             // Finished rows go; stuck rows (sending/queued with no live
@@ -772,6 +774,8 @@ public partial class LibraryView : UserControl
                         Format = string.IsNullOrEmpty(g.Info.Format) ? "pkg" : g.Info.Format,
                         IsFolder = g.Info.IsFolder,
                         ContentId = g.Info.ContentId,
+                        TitleId = g.Info.TitleId ?? "",
+                        Version = (g.Info.Version ?? "").TrimStart('v', 'V'),
                         Cover = g.Info.Cover,
                         HasCover = g.Info.Cover != null,
                         IconData = g.Info.IconData,
@@ -1129,6 +1133,89 @@ public partial class LibraryView : UserControl
             return;
         _server = new RangeFileServer(_registry);
         _server.Start();
+    }
+
+    /// <summary>
+    /// Publish library toggle (console browser catalog): the receiver pulls
+    /// GET /catalog + /icon/{id} from this PC and installs via its own page.
+    /// </summary>
+    private void SetPublish(bool on)
+    {
+        if (on)
+        {
+            try
+            {
+                EnsureServer();
+            }
+            catch (Exception ex)
+            {
+                Post(() =>
+                {
+                    this.FindControl<CheckBox>("PublishCheck").IsChecked = false;
+                    _m.Status = "File server failed (port 9898 busy — another sender running?): " + ex.Message;
+                });
+                return;
+            }
+            _server!.CatalogProvider = BuildCatalog;
+            Post(() => _m.Status = $"Library published: {_server!.CatalogUrlFor(_m.PcIp)} — open it from the console browser (pkg remote installer).");
+        }
+        else
+        {
+            if (_server != null)
+                _server.CatalogProvider = null;
+            Post(() => _m.Status = "Library unpublished.");
+        }
+    }
+
+    /// <summary>
+    /// Snapshot the scanned PKG list into catalog rows. Runs on the file
+    /// server thread — defensive copy, never throws.
+    /// </summary>
+    private IReadOnlyList<LoopDPI.Core.CatalogEntry> BuildCatalog()
+    {
+        var rows = new List<LoopDPI.Core.CatalogEntry>();
+        try
+        {
+            GameItem[] snap;
+            lock (_runLock)
+            {
+                snap = _all.ToArray();
+            }
+            foreach (var g in snap)
+            {
+                if (g.Format != "pkg" || g.IsFolder)
+                    continue;
+                string id;
+                lock (_runLock)
+                {
+                    if (!_pathIds.TryGetValue(g.Path, out id!))
+                    {
+                        id = "lib-" + _sessionTag + "-" + System.Threading.Interlocked.Increment(ref _nextId).ToString();
+                        _pathIds[g.Path] = id;
+                    }
+                }
+                _registry[id] = g.Path;
+                bool hasIcon = false;
+                if (g.IconData is { Length: > 0 } icon)
+                {
+                    _server?.RegisterIcon(id, icon);
+                    hasIcon = true;
+                }
+                rows.Add(new LoopDPI.Core.CatalogEntry
+                {
+                    Id = id,
+                    Title = g.Title,
+                    TitleId = g.TitleId,
+                    Version = g.Version,
+                    Size = g.SizeBytes,
+                    HasIcon = hasIcon,
+                });
+            }
+        }
+        catch
+        {
+        }
+        return rows;
     }
 
     // Pushed items awaiting their download, with server url-id, idle ticks
