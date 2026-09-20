@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html><head><meta charset=utf-8>
+<meta name=viewport content='width=device-width,initial-scale=1'>
+<title>pkg remote installer (mockup)</title>
+<style>body{background:#171717;color:#F1F3F8;font-family:'Segoe UI',sans-serif;margin:0;padding:16px;max-width:900px;margin-left:auto;margin-right:auto}
+.hd{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.hd h2{margin:0;font-size:20px;flex:1}
+.hd .ver{font-size:12px;color:#8B93A5}
+.hd .pc{font-size:12px;color:#6FCF7B;background:#202020;border-radius:4px;padding:4px 10px;white-space:nowrap}
+#tabs{display:flex;gap:8px;margin:12px 0 14px}
+#tabs button{flex:1;padding:12px;background:#2A2A2A;border:none;border-radius:4px;color:#F1F3F8;font-size:15px;font-weight:bold;cursor:pointer}
+#tabs button.on{background:#4F8EF7;color:#171717}
+#tools{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+#tools input{flex:1;min-width:160px;padding:12px;border:1px solid #2A2A2A;border-radius:4px;background:#2A2A2A;color:#F1F3F8;font-size:15px}
+#chips,#kind{display:flex;gap:6px;flex-wrap:wrap}
+#chips button,#kind button{padding:12px 14px;background:#2A2A2A;border:none;border-radius:4px;color:#F1F3F8;font-size:14px;cursor:pointer}
+#chips button.on,#kind button.on{background:#4F8EF7;color:#171717}
+#kind{margin-bottom:12px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.card{background:#202020;border-radius:8px;padding:10px;text-align:center}
+.cov{width:100%;height:120px;border-radius:4px;background:#101010;display:flex;align-items:center;justify-content:center;margin-bottom:8px}
+.cov span{font-size:40px;opacity:.35}
+.card .t{font-size:13px;margin:0 0 2px;min-height:32px}
+.card .m{font-size:11px;color:#8B93A5;margin-bottom:8px;min-height:15px}
+.badges{display:flex;gap:6px;justify-content:center;margin-bottom:8px;flex-wrap:wrap}
+.bdg{font-size:11px;font-weight:bold;border-radius:4px;padding:2px 8px}
+.card button{width:100%;padding:10px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer;font-size:14px}
+.fc{display:inline-block;font-size:11px;color:#4F8EF7;border:1px solid #4F8EF7;border-radius:10px;padding:2px 8px;margin:4px 0 8px;cursor:pointer}
+.fambox{margin-top:4px;display:flex;flex-direction:column;gap:6px}
+.member{display:flex;gap:8px;align-items:center;background:#171717;border-radius:8px;padding:8px;text-align:left}
+.member .t{font-size:12px}.member .m{font-size:11px;color:#8B93A5}
+.member div:first-child{flex:1;min-width:0}
+.member button{padding:8px 12px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer;white-space:nowrap}
+#msg{margin-top:14px;font-size:15px;color:#8B93A5;min-height:24px}</style></head><body>
+<div class=hd><h2>pkg remote installer</h2><span class=ver>page 20260920-12 • receiver 20260920-12</span><span class=pc>PC: 192.168.1.50 (auto)</span></div>
+<div id=tabs><button class=on>Library</button><button>Files</button></div>
+<div id=tools><input id=q placeholder='Search title or ID...'>
+<div id=chips><button data-p=all class=on>All</button><button data-p=PS5>PS5</button><button data-p=PS4>PS4</button></div></div>
+<div id=kind><button data-k=games class=on>Games</button><button data-k=images>Images</button></div>
+<div id=grid></div><div id=msg></div>
+<script>(function(){
+var all=[
+{id:'g1',title:'Astro Bot',titleId:'PPSA01677',version:'1.14',platform:'PS5',format:'pkg',sizeText:'12.4 GB',familyKey:'PPSA01677',role:'Game',hasIcon:false},
+{id:'g1p',title:'Astro Bot',titleId:'PPSA01677',version:'1.15',platform:'PS5',format:'pkg',sizeText:'2.1 GB',familyKey:'PPSA01677',role:'Patch',hasIcon:false},
+{id:'g2',title:'God of War Ragnarok',titleId:'PPSA08385',version:'06.00',platform:'PS5',format:'pkg',sizeText:'84.2 GB',familyKey:'PPSA08385',role:'Game',hasIcon:false},
+{id:'g2d',title:'Ragnarok: Valhalla DLC',titleId:'PPSA08385',version:'01.00',platform:'PS5',format:'pkg',sizeText:'8.7 GB',familyKey:'PPSA08385',role:'DLC',hasIcon:false},
+{id:'g3',title:'Bloodborne',titleId:'CUSA00900',version:'1.09',platform:'PS4',format:'pkg',sizeText:'27.9 GB',familyKey:'CUSA00900',role:'Game',hasIcon:false},
+{id:'g4',title:'Stellar Blade',titleId:'PPSA02117',version:'1.04',platform:'PS5',format:'pkg',sizeText:'31.5 GB',familyKey:'PPSA02117',role:'Game',hasIcon:false},
+{id:'i1',title:'Returnal dump',titleId:'PPSA01285',platform:'PS5',format:'ffpfsc',sizeText:'69.6 GB',file:'Returnal-PPSA01285.ffpfsc',hasIcon:false},
+{id:'i2',title:'Elden Ring dump',titleId:'PPSA04610',platform:'PS5',format:'exfat',sizeText:'196.0 GB',file:'ELDEN RING - PPSA04610.exfat',hasIcon:false},
+{id:'i3',title:'NFS Unbound dump',titleId:'PPSA01716',platform:'PS5',format:'ffpkg',sizeText:'34.2 GB',file:'NFS Unbound - PPSA01716.ffpkg',hasIcon:false},
+{id:'i4',title:'ProsperoRadio',titleId:'PPSA99001',platform:'PS5',format:'ffpfsc',sizeText:'8.5 MB',file:'ProsperoRadio.ffpfsc',hasIcon:false}
+];
+var openFam=null,plat='all',kind='games',q='';
+var grid=document.getElementById('grid'),msg=document.getElementById('msg');
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function fmtColor(f){if(f==='exfat')return '#34B595';if(f==='ffpfsc')return '#CE9C40';if(f==='ffpkg')return '#A27AD8';return '#6498F0';}
+function fmtBadge(f){return '<span class=bdg style="background:'+fmtColor(f)+';color:#fff">'+esc((f||'img').toUpperCase())+'</span>';}
+function platBadge(p){if(p==='PS5')return '<span class=bdg style="background:#F1F3F8;color:#171717">PS5</span>';if(p==='PS4')return '<span class=bdg style="background:#0070D1;color:#fff">PS4</span>';return '';}
+function ph(){return '<div class=cov><span>📦</span></div>';}
+function matchQ(g){if(!q)return 1;return (g.title+' '+g.titleId).toLowerCase().indexOf(q)>=0;}
+function matchP(g){if(plat==='all')return 1;return g.platform===plat;}
+function isBase(g){return g.role==='Game';}
+function card(g,sub){
+var d=document.createElement('div');d.className=sub?'member':'card';
+if(sub){
+var badge=g.role==='Patch'?'<span class=bdg style="background:#4F8EF7;color:#171717">Patch</span>':(g.role==='DLC'?'<span class=bdg style="background:#E8A34C;color:#171717">DLC</span>':'');
+d.innerHTML='<div><div class=t>'+esc(g.title)+'</div><div class=m>'+esc(g.titleId)+' v'+esc(g.version||'')+' &middot; '+esc(g.sizeText)+'</div></div>';
+var w=document.createElement('div');w.innerHTML=badge;
+var b=document.createElement('button');b.textContent='Install';
+b.onclick=function(ev){ev.stopPropagation();msg.textContent='Installing '+g.title+'... (mockup)';};
+w.appendChild(b);d.appendChild(w);return d;}
+if(kind==='images'){
+d.innerHTML=ph()+'<div class=t>'+esc(g.title)+'</div><div class=m>'+esc(g.titleId)+'</div><div class=badges>'+fmtBadge(g.format)+'</div><div class=m>'+esc(g.sizeText)+'</div>';
+var cb=document.createElement('button');cb.textContent='Copy to homebrew';
+cb.onclick=function(ev){ev.stopPropagation();msg.textContent='Copying '+g.file+'... (mockup)';};
+d.appendChild(cb);return d;}
+var fam=all.filter(function(m){return m.format==='pkg'&&!isBase(m)&&m.familyKey===g.familyKey;});
+var cnt=fam.length?'<span class=fc>'+fam.length+' add-on'+(fam.length>1?'s':'')+'</span>':'';
+d.innerHTML=ph()+'<div class=t>'+esc(g.title)+'</div><div class=m>'+esc(g.titleId)+(g.version?' v'+esc(g.version):'')+' &middot; '+esc(g.sizeText)+'</div><div class=badges>'+platBadge(g.platform)+'</div>'+cnt;
+var ib=document.createElement('button');ib.textContent='Install';
+ib.onclick=function(ev){ev.stopPropagation();msg.textContent='Installing '+g.title+'... (mockup)';};
+d.appendChild(ib);
+d.onclick=function(){openFam=(openFam===g.familyKey)?null:g.familyKey;render();};
+if(openFam===g.familyKey&&fam.length){var box=document.createElement('div');box.className='fambox';fam.forEach(function(m){box.appendChild(card(m,1));});var wrap=document.createElement('div');wrap.appendChild(d);wrap.appendChild(box);return wrap;}
+return d;}
+function render(){grid.innerHTML='';var list;
+if(kind==='images'){list=all.filter(function(g){return g.format!=='pkg'&&matchP(g)&&matchQ(g);});
+if(!list.length){msg.textContent='No match.';return;}
+msg.textContent=list.length+' images';list.forEach(function(g){grid.appendChild(card(g,0));});return;}
+var bases=all.filter(function(g){return g.format==='pkg'&&isBase(g)&&matchP(g)&&matchQ(g);});
+if(!bases.length){msg.textContent='No match.';return;}
+msg.textContent=bases.length+' games';bases.forEach(function(g){grid.appendChild(card(g,0));});}
+document.getElementById('q').oninput=function(e){q=e.target.value.trim().toLowerCase();render();};
+var ch=document.getElementById('chips').children;
+for(var i=0;i<ch.length;i++)(function(b){b.onclick=function(){for(var j=0;j<ch.length;j++)ch[j].className='';b.className='on';plat=b.getAttribute('data-p');render();};})(ch[i]);
+var kd=document.getElementById('kind').children;
+for(var k=0;k<kd.length;k++)(function(b){b.onclick=function(){for(var j=0;j<kd.length;j++)kd[j].className='';b.className='on';kind=b.getAttribute('data-k');render();};})(kd[k]);
+render();})();
+</script></body></html>
