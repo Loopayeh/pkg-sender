@@ -26,7 +26,8 @@
 .bdg{font-size:11px;font-weight:bold;border-radius:4px;padding:2px 8px}
 .card button{width:100%;padding:10px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer;font-size:14px}
 .fc{display:inline-block;font-size:12px;color:#4F8EF7;border:1px solid #4F8EF7;border-radius:10px;padding:3px 10px;margin:4px 0 8px;cursor:pointer;background:transparent}
-.fambox{margin:2px 0 8px;display:flex;flex-direction:column;gap:0;background:#171717;border:1px solid #2A2A2A;border-radius:8px;overflow:hidden}
+.fambox{margin:2px 0 8px;display:flex;flex-direction:column;background:#171717;border:1px solid #2A2A2A;border-radius:8px;overflow:hidden;max-height:250px;overflow-y:auto}
+.famgrp{font-size:11px;font-weight:bold;color:#8B93A5;padding:8px 12px 4px;position:sticky;top:0;background:#171717}
 .member{display:flex;gap:10px;align-items:center;padding:10px 12px;text-align:left;border-bottom:1px solid #2A2A2A}
 .member:last-child{border-bottom:none}
 .member .t{font-size:13px}.member .m{font-size:11px;color:#8B93A5;margin-top:2px}
@@ -47,6 +48,14 @@ var all=[
 {id:'g2d',title:'Ragnarok: Valhalla DLC',titleId:'PPSA08385',version:'01.00',platform:'PS5',format:'pkg',sizeText:'8.7 GB',familyKey:'PPSA08385',role:'DLC',hasIcon:false},
 {id:'g3',title:'Bloodborne',titleId:'CUSA00900',version:'1.09',platform:'PS4',format:'pkg',sizeText:'27.9 GB',familyKey:'CUSA00900',role:'Game',hasIcon:false},
 {id:'g4',title:'Stellar Blade',titleId:'PPSA02117',version:'1.04',platform:'PS5',format:'pkg',sizeText:'31.5 GB',familyKey:'PPSA02117',role:'Game',hasIcon:false},
+{id:'g5',title:'Train Sim World',titleId:'PPSA03012',version:'1.00',platform:'PS5',format:'pkg',sizeText:'22.0 GB',familyKey:'PPSA03012',role:'Game',hasIcon:false},
+{id:'g5p',title:'Train Sim World',titleId:'PPSA03012',version:'1.02',platform:'PS5',format:'pkg',sizeText:'1.4 GB',familyKey:'PPSA03012',role:'Patch',hasIcon:false},
+{id:'g5d1',title:'Route: London-Brighton',titleId:'PPSA03012',version:'1.00',platform:'PS5',format:'pkg',sizeText:'3.2 GB',familyKey:'PPSA03012',role:'DLC',hasIcon:false},
+{id:'g5d2',title:'Route: Alpine Pass',titleId:'PPSA03012',version:'1.00',platform:'PS5',format:'pkg',sizeText:'2.8 GB',familyKey:'PPSA03012',role:'DLC',hasIcon:false},
+{id:'g5d3',title:'Loco Pack Vol.1',titleId:'PPSA03012',version:'1.00',platform:'PS5',format:'pkg',sizeText:'1.1 GB',familyKey:'PPSA03012',role:'DLC',hasIcon:false},
+{id:'g5d4',title:'Loco Pack Vol.2',titleId:'PPSA03012',version:'1.00',platform:'PS5',format:'pkg',sizeText:'1.3 GB',familyKey:'PPSA03012',role:'DLC',hasIcon:false},
+{id:'g5d5',title:'Station Pack',titleId:'PPSA03012',version:'1.00',platform:'PS5',format:'pkg',sizeText:'900 MB',familyKey:'PPSA03012',role:'DLC',hasIcon:false},
+{id:'g5d6',title:'Sound Pack',titleId:'PPSA03012',version:'1.00',platform:'PS5',format:'pkg',sizeText:'600 MB',familyKey:'PPSA03012',role:'DLC',hasIcon:false},
 {id:'i1',title:'Returnal dump',titleId:'PPSA01285',platform:'PS5',format:'ffpfsc',sizeText:'69.6 GB',file:'Returnal-PPSA01285.ffpfsc',hasIcon:false},
 {id:'i2',title:'Elden Ring dump',titleId:'PPSA04610',platform:'PS5',format:'exfat',sizeText:'196.0 GB',file:'ELDEN RING - PPSA04610.exfat',hasIcon:false},
 {id:'i3',title:'NFS Unbound dump',titleId:'PPSA01716',platform:'PS5',format:'ffpkg',sizeText:'34.2 GB',file:'NFS Unbound - PPSA01716.ffpkg',hasIcon:false},
@@ -65,7 +74,7 @@ function isBase(g){return g.role==='Game';}
 function card(g,sub){
 var d=document.createElement('div');d.className=sub?'member':'card';
 if(sub){
-var badge=g.role==='Patch'?'<span class=bdg style="background:#4F8EF7;color:#171717">Patch</span>':(g.role==='DLC'?'<span class=bdg style="background:#E8A34C;color:#171717">DLC</span>':'');
+var badge=g.role==='Patch'?'<span class=bdg style="background:#A27AD8;color:#fff">Patch</span>':(g.role==='DLC'?'<span class=bdg style="background:#E8A34C;color:#171717">DLC</span>':'');
 d.innerHTML='<div><div class=t>'+esc(g.title)+'</div><div class=m>'+esc(g.titleId)+' v'+esc(g.version||'')+' &middot; '+esc(g.sizeText)+'</div></div>';
 var w=document.createElement('div');w.innerHTML=badge;
 var b=document.createElement('button');b.textContent='Install';
@@ -83,7 +92,14 @@ var ib=document.createElement('button');ib.textContent='Install';
 ib.onclick=function(ev){ev.stopPropagation();msg.textContent='Installing '+g.title+'... (mockup)';};
 d.appendChild(ib);
 d.onclick=function(){openFam=(openFam===g.familyKey)?null:g.familyKey;render();};
-if(openFam===g.familyKey&&fam.length){var box=document.createElement('div');box.className='fambox';fam.forEach(function(m){box.appendChild(card(m,1));});var wrap=document.createElement('div');wrap.appendChild(d);wrap.appendChild(box);return wrap;}
+if(openFam===g.familyKey&&fam.length){
+var box=document.createElement('div');box.className='fambox';
+fam.sort(function(a,b){return (a.role==='Patch'?0:1)-(b.role==='Patch'?0:1);});
+var patches=fam.filter(function(m){return m.role==='Patch';});
+var dlcs=fam.filter(function(m){return m.role!=='Patch';});
+function grp(title,arr){if(!arr.length)return;var h=document.createElement('div');h.className='famgrp';h.textContent=title+' ('+arr.length+')';box.appendChild(h);arr.forEach(function(m){box.appendChild(card(m,1));});}
+grp('Patches',patches);grp('DLC',dlcs);
+var wrap=document.createElement('div');wrap.appendChild(d);wrap.appendChild(box);return wrap;}
 return d;}
 function render(){grid.innerHTML='';var list;
 if(kind==='images'){list=all.filter(function(g){return g.format!=='pkg'&&matchP(g)&&matchQ(g);});
