@@ -205,18 +205,9 @@ public partial class LibraryView : UserControl
             btnCopy.IsEnabled = hasImg;
             btnSend.FontWeight = hasPkg ? FontWeight.Bold : FontWeight.Normal;
             btnCopy.FontWeight = hasImg ? FontWeight.Bold : FontWeight.Normal;
-            // Active action goes blue, like Send: Copy images earns the
-            // accent as soon as an image is in the selection.
-            if (hasImg)
-            {
-                btnCopy.Background = new SolidColorBrush(Color.Parse("#4F8EF7"));
-                btnCopy.Foreground = new SolidColorBrush(Color.Parse("#FFFFFF"));
-            }
-            else
-            {
-                btnCopy.ClearValue(Button.BackgroundProperty);
-                btnCopy.ClearValue(Button.ForegroundProperty);
-            }
+            // Active action takes the default blue style (same as Send);
+            // otherwise it falls back to ghost, like every other button.
+            btnCopy.Classes.Set("ghost", !hasImg);
             UpdateGamesLabel();
         };
         // Dense grid: columns follow the panel width so cards always fill
