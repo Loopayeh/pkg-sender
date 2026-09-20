@@ -95,6 +95,64 @@ public static class ConsoleClient
         }
     }
 
+    /// <summary>
+    /// Pull-copy progress from GET /api/status: (active, name, got, want).
+    /// </summary>
+    public static async Task<(bool Active, string Name, long Got, long Want)> GetPullAsync(string psIp)
+    {
+        try
+        {
+            using var c = NewClient(10);
+            string body = await c.GetStringAsync($"http://{psIp}:12800/api/status");
+            bool active = body.Contains("\"pull\":true");
+            string name = StrField(body, "pullName");
+            long got = LongField(body, "pullGot");
+            long want = LongField(body, "pullWant");
+            return (active, name, got, want);
+        }
+        catch
+        {
+            return (false, "", 0, -1);
+        }
+    }
+
+    private static string StrField(string body, string key)
+    {
+        try
+        {
+            string pat = "\"" + key + "\":\"";
+            int i = body.IndexOf(pat, StringComparison.Ordinal);
+            if (i < 0)
+                return "";
+            i += pat.Length;
+            int j = body.IndexOf('"', i);
+            return j < 0 ? "" : body[i..j];
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static long LongField(string body, string key)
+    {
+        try
+        {
+            string pat = "\"" + key + "\":";
+            int i = body.IndexOf(pat, StringComparison.Ordinal);
+            if (i < 0)
+                return -1;
+            i += pat.Length;
+            int j = i;
+            while (j < body.Length && (char.IsDigit(body[j]) || body[j] == '-'))
+                j++;
+            return long.TryParse(body[i..j], out long v) ? v : -1;
+        }
+        catch
+        {
+            return -1;
+        }
+    }
     private static string JsonEscape(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");
 }

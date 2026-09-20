@@ -887,7 +887,15 @@ static const char UI_HTML[] =
 "try{var r=await fetch('/api/files/pull',{method:'POST',headers:{'Content-Type':'application/json'},"
 "body:JSON.stringify({url:'http://'+pcEl.value+':9898/pkg/'+id,path:'/data/homebrew/'+file})});"
 "var x=await r.text();"
-"msg.textContent=(x.indexOf('started')>=0)?'Copy started — watch the console notifications.':x;}"
+"if(x.indexOf('started')<0){msg.textContent=x;return;}"
+"for(var i=0;i<1800;i++){await new Promise(function(rs){setTimeout(rs,2000);});"
+"try{var s=await fetch('/api/status');var j=await s.json();"
+"if(!j.pull){msg.textContent='Copy started — watch the console notifications.';return;}"
+"if(j.pullWant>0){var pc=Math.floor(j.pullGot*100/j.pullWant);"
+"msg.textContent='Copying '+file+': '+pc+'% ('+fmtSize(j.pullGot)+' / '+fmtSize(j.pullWant)+')';}"
+"else msg.textContent='Copying '+file+': '+fmtSize(j.pullGot);}"
+"catch(ex){msg.textContent='Copy started — watch the console notifications.';return;}}"
+"msg.textContent='Copy started — watch the console notifications.';}"
 "catch(ex){msg.textContent='Error: '+ex;}}"
 "function imgIcon(f){if(f==='exfat')return '💽';if(f==='ffpkg'||f==='ffpfsc')return '🗜';return '📦';}"
 "function card(g,sub){var d=document.createElement('div');d.className=sub?'member':'card';"
@@ -1024,6 +1032,12 @@ typedef struct pull_job {
 	char local[PATH_MAX_V];
 } pull_job_t;
 
+/* pull progress, visible in GET /api/status while a copy runs */
+static volatile int g_pull_active = 0;
+static volatile long long g_pull_got = 0;
+static volatile long long g_pull_want = -1;
+static char g_pull_name[128];
+
 /* 0 = ok, 1 = skipped (same size present), -1 = error */
 static int
 pull_download(const char *url, const char *local)
@@ -1066,6 +1080,15 @@ pull_download(const char *url, const char *local)
 	freeaddrinfo(res);
 	if (s < 0)
 		return -1;
+	/* a stalled tunnel must fail loudly, never hang the worker forever */
+	{
+		struct timeval tv;
+
+		tv.tv_sec = 30;
+		tv.tv_usec = 0;
+		setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+		setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+	}
 	snprintf(req, sizeof(req),
 	    "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
 	    get, host);
@@ -1126,6 +1149,8 @@ pull_download(const char *url, const char *local)
 		close(s);
 		return -1;
 	}
+	g_pull_want = want;
+	g_pull_got = 0;
 	for (;;) {
 		n = recv(s, hb, sizeof(hb), 0);
 		if (n < 0) {
@@ -1138,6 +1163,7 @@ pull_download(const char *url, const char *local)
 		if (write(out, hb, (size_t)n) != n)
 			break;
 		got += n;
+		g_pull_got = got;
 	}
 	close(s);
 	close(out);
@@ -1157,9 +1183,20 @@ pull_worker(void *arg)
 	int rc;
 
 	snprintf(base, sizeof(base), "%s", b ? b + 1 : job->local);
+	snprintf(g_pull_name, sizeof(g_pull_name), "%s", base);
+	/* keep /api/status JSON valid: no quotes/backslashes in the name */
+	{
+		char *q;
+
+		for (q = g_pull_name; *q; q++)
+			if (*q == '"' || *q == '\\')
+				*q = '_';
+	}
+	g_pull_active = 1;
 	__sync_fetch_and_add(&g_active_installs, 1);
 	rc = pull_download(job->url, job->local);
 	__sync_fetch_and_sub(&g_active_installs, 1);
+	g_pull_active = 0;
 	if (rc == 0)
 		snprintf(toast, sizeof(toast), "Loopayeh: copied %s", base);
 	else if (rc == 1)
@@ -1295,11 +1332,16 @@ handle_client(int fd)
 		}
 	} else if (!strcmp(method, "GET") &&
 	           !strncmp(path, "/api/status", 11)) {
-		char out[64];
+		char out[256];
 
-		snprintf(out, sizeof(out), "{\"busy\":%s,\"active\":%d}",
+		snprintf(out, sizeof(out), "{\"busy\":%s,\"active\":%d,"
+		    "\"pull\":%s,\"pullName\":\"%s\","
+		    "\"pullGot\":%lld,\"pullWant\":%lld}",
 		    g_active_installs > 0 ? "true" : "false",
-		    g_active_installs);
+		    g_active_installs,
+		    g_pull_active ? "true" : "false",
+		    g_pull_active ? g_pull_name : "",
+		    g_pull_got, g_pull_want);
 		send_json(fd, out);
 	} else if (!strcmp(method, "GET") &&
 	           !strncmp(path, "/api/pc", 7)) {

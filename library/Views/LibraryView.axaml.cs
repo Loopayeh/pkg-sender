@@ -1224,7 +1224,21 @@ public partial class LibraryView : UserControl
             var (started, reply) = await LoopDPI.Core.ConsoleClient.PullAsync(_m.PsIp, url, remote);
             PullLog($"{DateTime.Now:HH:mm:ss} {g.Title} local={localCheck} started={started} reply={reply}");
             if (started)
+            {
                 ok++;
+                // Follow the copy: poll the receiver's pull progress so a
+                // 36GB image doesn't look dead while it downloads.
+                for (int t = 0; t < 7200; t++)
+                {
+                    await Task.Delay(3000);
+                    var (active, name, got, want) = await LoopDPI.Core.ConsoleClient.GetPullAsync(_m.PsIp);
+                    if (!active)
+                        break;
+                    _m.Status = want > 0
+                        ? $"Copying {g.Title}: {got * 100 / want}% ({Program.FormatSize(got)} / {Program.FormatSize(want)})"
+                        : $"Copying {g.Title}: {Program.FormatSize(got)}";
+                }
+            }
             else
                 _m.Status = $"Copy failed for {g.Title}: local={localCheck} console={CopyHint(reply)}";
         }
