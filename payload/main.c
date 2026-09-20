@@ -184,6 +184,8 @@ installer_init(void)
  * Skipped entirely in TEST_ONLY builds. */
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
+/* bump on every behavior change; the page shows receiver vs page tags */
+#define RECEIVER_BUILD "20260920-06"
 
 __asm__(
 ".section .rodata\n"
@@ -991,8 +993,10 @@ static const char UI_HTML[] =
 ".frow button{font-size:15px;padding:10px 14px}</style></head><body>"
 
 "<h2>pkg remote installer</h2>"
+"<div id=ver style='font-size:12px;color:#8B93A5;margin-bottom:12px'>page …</div>"
 "form#mf{display:flex;flex-direction:column;gap:12px;width:90%;max-width:520px;margin:0 auto}</style></head><body>"
 "<h2>pkg remote installer</h2>"
+"<div id=ver style='font-size:12px;color:#8B93A5;margin-bottom:12px'>page …</div>"
 "<div id=tabs><button id=tabL class=on>Library</button><button id=tabF>Files</button></div>"
 "<div id=lib>"
 "<div id=pcrow><span id=pcstat>PC: ...</span>"
@@ -1010,7 +1014,15 @@ static const char UI_HTML[] =
 "<div id=crumb><button class=gh id=up>Up</button><span id=fpath>/data</span></div>"
 "<div id=mkrow><input id=mkname placeholder='New folder name'><button class=go id=mkbtn>New folder</button></div>"
 "<div id=flist></div><div id=fmsg></div></div>"
-"<script>(function(){var pcEl=document.getElementById('pc');"
+"<script>(function(){var PAGE_BUILD='" RECEIVER_BUILD "';"
+"var verd=document.getElementById('ver');"
+"verd.textContent='page '+PAGE_BUILD+' • receiver …';"
+"fetch('/api/version').then(function(r){return r.text();}).then(function(t){"
+"if(t.charAt(0)!=='{'){verd.textContent='page '+PAGE_BUILD+' • receiver: unknown (old payload? resend ELF)';return;}"
+"var j=JSON.parse(t);"
+"verd.textContent='page '+PAGE_BUILD+' • receiver '+j.build+((j.build===PAGE_BUILD)?'':' • MISMATCH — resend the newest ELF');"
+"}).catch(function(){verd.textContent='page '+PAGE_BUILD+' • receiver: unreachable';});"
+"var pcEl=document.getElementById('pc');"
 "var pcstat=document.getElementById('pcstat');"
 "var grid=document.getElementById('grid');var msg=document.getElementById('msg');"
 "var qEl=document.getElementById('q');"
@@ -1815,6 +1827,9 @@ handle_client(int fd)
 		g_pull_paused = paused ? 1 : 0;
 		send_json(fd, g_pull_paused ? "{\"ok\":true,\"paused\":true}"
 		    : "{\"ok\":true,\"paused\":false}");
+	} else if (!strcmp(method, "GET") &&
+	           !strncmp(path, "/api/version", 12)) {
+		send_json(fd, "{\"build\":\"" RECEIVER_BUILD "\"}");
 	} else if (!strcmp(method, "GET") &&
 	           !strncmp(path, "/api/status", 11)) {
 		char out[256];
