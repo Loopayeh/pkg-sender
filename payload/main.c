@@ -19,6 +19,8 @@
  *   POST /api/files/mkdir  {"path":..}    - mkdir -p under /data/homebrew
  *   POST /api/files/write?path=..&offset= - raw chunk append
  *   POST /api/files/done   {"path":..,"size":N} - verify + toast
+ *   Files tab + /api/fs/* : TEMP-DISABLED (see ENABLE_FILES_TAB;
+ *   backup: main.c.with-files-tab.bak)
  *   UDP beacon: "PKGSENDER v1" broadcast to 255.255.255.255:12801 every 3s
  *
  * TEST_ONLY build (make TEST_ONLY=1): beacon + /api + /api/status work,
@@ -61,6 +63,12 @@
 #define BODY_MAX   (8 * 1024 * 1024)
 #define URL_MAX    2048
 #define PATH_MAX_V 1024
+
+/* File explorer (Files tab + /api/fs/*) is TEMPORARILY DISABLED.
+ * Full code is kept below behind ENABLE_FILES_TAB and the last
+ * working copy is saved as main.c.with-files-tab.bak.
+ * To re-enable: #define ENABLE_FILES_TAB 1 */
+// #define ENABLE_FILES_TAB 1
 
 /* ── PS5 system notification (visible toast on the console) ──────────── */
 typedef struct notify_request {
@@ -185,7 +193,7 @@ installer_init(void)
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
 /* bump on every behavior change; the page shows receiver vs page tags */
-#define RECEIVER_BUILD "20260920-12"
+#define RECEIVER_BUILD "20260920-17"
 
 __asm__(
 ".section .rodata\n"
@@ -636,8 +644,8 @@ mkdir_p(const char *path)
 }
 
 /* ── /data file browser (Files tab) ────────────────────────────────────
- * All paths stay inside FS_ROOT (/data); no ".." escapes; delete is
- * files + empty dirs only (no recursive delete). */
+ * TEMP-DISABLED: see ENABLE_FILES_TAB above. Kept for later work. */
+#ifdef ENABLE_FILES_TAB
 #define FS_ROOT "/data"
 #define FS_MAX_ENTRIES 2000
 
@@ -840,6 +848,7 @@ fs_entry_cmp(const void *a, const void *b)
 		return y->is_dir - x->is_dir; /* dirs first */
 	return strcmp(x->name, y->name);
 }
+#endif /* ENABLE_FILES_TAB */
 
 /* query key= -> decoded value (stops at & or space) */
 static int
@@ -957,38 +966,42 @@ static const char UI_HTML[] =
 "<!DOCTYPE html><html><head><meta charset=utf-8>"
 "<meta name=viewport content='width=device-width,initial-scale=1'>"
 "<title>pkg remote installer</title>"
-"<style>body{background:#171717;color:#F1F3F8;font-family:'Segoe UI',sans-serif;margin:0;padding:16px}"
-"h2{color:#F1F3F8;margin:0 0 12px;font-size:20px}"
+"<style>body{background:#171717;color:#F1F3F8;font-family:'Segoe UI',sans-serif;margin:0;padding:24px;font-size:19px}"
+"h2{color:#F1F3F8;margin:0 0 14px;font-size:30px}"
 "#tabs{display:flex;gap:8px;margin-bottom:14px}"
-"#tabs button{flex:1;padding:12px;background:#2A2A2A;border:none;border-radius:4px;color:#F1F3F8;font-size:15px;font-weight:bold;cursor:pointer}"
+"#tabs button{flex:1;padding:18px;background:#2A2A2A;border:none;border-radius:6px;color:#F1F3F8;font-size:21px;font-weight:bold;cursor:pointer}"
 "#tabs button.on{background:#4F8EF7;color:#171717}"
-"#pcrow{display:flex;gap:8px;margin-bottom:12px;align-items:center}"
-"#pcstat{font-size:12px;color:#8B93A5;white-space:nowrap}"
-"#tools{display:flex;gap:8px;margin-bottom:12px}"
+"#pcrow{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}"
+"#pcstat{font-size:15px;color:#8B93A5;white-space:nowrap}"
+"#tools{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}"
 "#tools input{flex:1}"
 "#chips,#kind{display:flex;gap:6px}"
-"#chips button,#kind button{padding:12px 14px;background:#2A2A2A;border:none;border-radius:4px;color:#F1F3F8;font-size:14px;cursor:pointer}"
+"#chips button,#kind button{padding:16px 20px;background:#2A2A2A;border:none;border-radius:6px;color:#F1F3F8;font-size:19px;cursor:pointer}"
 "#chips button.on,#kind button.on{background:#4F8EF7;color:#171717}"
 "#kind{margin-bottom:12px}"
-"input{flex:1;padding:12px;border:1px solid #2A2A2A;border-radius:4px;background:#2A2A2A;color:#F1F3F8;font-size:15px}"
-"button.go{padding:12px 16px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-size:14px;font-weight:bold;cursor:pointer}"
-"button.gh{padding:10px 14px;background:#404040;border:none;border-radius:4px;color:#F1F3F8;font-size:14px;cursor:pointer}"
-"button.danger{padding:10px 14px;background:#E17B7B;border:none;border-radius:4px;color:#171717;font-size:14px;font-weight:bold;cursor:pointer}"
-"#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}"
-".card{background:#202020;border-radius:8px;padding:10px;text-align:center}"
-".card img{width:100%;height:120px;object-fit:contain;background:#171717}"
-".card .t{font-size:13px;margin:8px 0 2px;min-height:32px}"
-".card .m{font-size:11px;color:#8B93A5;margin-bottom:8px}"
-".card button{width:100%;padding:10px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer}"
-".big{font-size:44px}"
-".fc{display:inline-block;font-size:11px;color:#4F8EF7;border:1px solid #4F8EF7;border-radius:10px;padding:2px 8px;margin-top:4px}"
-".fambox{margin-top:8px;display:flex;flex-direction:column;gap:6px}"
-".member{display:flex;gap:8px;align-items:center;background:#171717;border-radius:8px;padding:8px;text-align:left}"
-".member .t{font-size:12px}.member .m{font-size:11px;color:#8B93A5}"
+"input{flex:1;padding:16px;border:1px solid #2A2A2A;border-radius:6px;background:#2A2A2A;color:#F1F3F8;font-size:19px}"
+"button.go{padding:16px 22px;background:#4F8EF7;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer}"
+"button.gh{padding:14px 20px;background:#404040;border:none;border-radius:6px;color:#F1F3F8;font-size:19px;cursor:pointer}"
+"button.danger{padding:14px 20px;background:#E17B7B;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer}"
+"#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}"
+".card{background:#202020;border-radius:10px;padding:14px;text-align:center}"
+".card img{width:100%;height:170px;object-fit:contain;background:#171717}"
+".card .t{font-size:18px;margin:10px 0 4px;min-height:44px}"
+".card .m{font-size:15px;color:#8B93A5;margin-bottom:10px}"
+".card button{width:100%;padding:15px;background:#4F8EF7;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer}"
+".card.sel{outline:2px solid #4F8EF7}"
+".fampanel{grid-column:1/-1;background:#202020;border-radius:8px;padding:10px}"
+".big{font-size:64px}"
+".fc{display:inline-block;font-size:15px;color:#4F8EF7;border:1px solid #4F8EF7;border-radius:12px;padding:4px 12px;margin-top:6px}"
+".fambox{margin-top:8px;display:flex;flex-direction:column;gap:8px}"
+".member{display:flex;gap:10px;align-items:center;background:#171717;border-radius:10px;padding:14px;text-align:left}"
+".member .t{font-size:17px}.member .m{font-size:15px;color:#8B93A5}"
 ".member div:first-child{flex:1}"
-".rb{font-size:10px;color:#171717;background:#4F8EF7;border-radius:4px;padding:2px 6px;margin-right:6px}"
-".member button{padding:8px 12px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer}"
-"#msg,#fmsg{margin-top:14px;font-size:15px;color:#8B93A5;min-height:24px}"
+".rb{font-size:13px;color:#171717;background:#4F8EF7;border-radius:4px;padding:3px 8px;margin-right:8px}"
+".member button{padding:13px 20px;background:#4F8EF7;border:none;border-radius:6px;color:#171717;font-size:18px;font-weight:bold;cursor:pointer}"
+"#msg{margin-top:16px;font-size:19px;color:#8B93A5;min-height:30px}"
+"#msg.ok{color:#34B595}#msg.err{color:#E17B7B}"
+"#fmsg{margin-top:14px;font-size:15px;color:#8B93A5;min-height:24px}"
 "#crumb,#mkrow,#usbrow{display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap}"
 "#fpath{font-size:15px;color:#8B93A5}"
 ".frow{display:flex;gap:10px;align-items:center;background:#202020;border-radius:8px;padding:14px;margin-bottom:10px}"
@@ -998,11 +1011,11 @@ static const char UI_HTML[] =
 ".frow button{font-size:15px;padding:10px 14px}</style></head><body>"
 
 "<h2>pkg remote installer</h2>"
-"<div id=ver style='font-size:12px;color:#8B93A5;margin-bottom:12px'>page …</div>"
-"<div id=tabs><button id=tabL class=on>Library</button><button id=tabF>Files</button></div>"
+"<div id=ver style='font-size:15px;color:#8B93A5;margin-bottom:12px'>page …</div>"
+"<div id=tabs style='display:none'><button id=tabL class=on>Library</button><button id=tabF style='display:none'>Files</button></div>"
 "<div id=lib>"
 "<div id=pcrow><span id=pcstat>PC: ...</span>"
-"<input id=pc placeholder='PC address'><button class=go id=save>Save</button></div>"
+"<input id=pc placeholder='PC address'><button class=go id=save>Save</button><button class=gh id=reload>Refresh</button></div>"
 "<div id=tools><input id=q placeholder='Search title or ID...'>"
 "<div id=chips><button data-p=all class=on>All</button><button data-p=PS5>PS5</button><button data-p=PS4>PS4</button></div></div>"
 "<div id=kind><button data-k=games class=on>Games</button><button data-k=images>Images</button></div>"
@@ -1049,10 +1062,18 @@ static const char UI_HTML[] =
 "function matchQ(g){var q=qEl.value.trim().toLowerCase();if(!q)return 1;"
 "return (g.title+' '+g.titleId).toLowerCase().indexOf(q)>=0;}"
 "function matchP(g){if(plat==='all')return 1;return g.platform===plat;}"
-"async function install(id,name){msg.textContent='Installing '+name+'...';"
+"async function install(id,name){msg.className='';msg.textContent='Installing '+name+'...';"
 "try{var u='http://'+pcEl.value+':9898/pkg/'+encodeURIComponent(id);"
 "var r=await fetch('/install?url='+encodeURIComponent(u));"
-"msg.textContent=await r.text();}catch(ex){msg.textContent='Error: '+ex;}}"
+"var t=await r.text();"
+"if(t.indexOf('ok:')===0){msg.className='ok';msg.textContent=t+' — watch the console notifications.';pollBusy(name);}"
+"else{msg.className='err';msg.textContent=t;}}catch(ex){msg.className='err';msg.textContent='Error: '+ex;}}"
+"async function pollBusy(name){"
+"for(var i=0;i<300;i++){await new Promise(function(rs){setTimeout(rs,2000);});"
+"try{var s=await fetch('/api/status');var j=await s.json();"
+"if(!j.busy){msg.className='ok';msg.textContent='Done: '+name+' — check the console.';return;}"
+"msg.className='';msg.textContent='Installing '+name+'... (active: '+j.active+')';}"
+"catch(ex){return;}}}"
 "async function copyImg(id,file,size){msg.textContent='Copying '+file+'...';"
 "var mode='overwrite';"
 "try{var st=await fetch('/api/files/stat?path='+encodeURIComponent('/data/homebrew/'+file));"
@@ -1082,8 +1103,14 @@ static const char UI_HTML[] =
 "catch(ex){msg.textContent='Error: '+ex;}}"
 "function imgIcon(f){if(f==='exfat')return '💽';if(f==='ffpkg'||f==='ffpfsc')return '🗜';return '📦';}"
 "function fmtColor(f){if(f==='exfat')return '#34B595';if(f==='ffpfsc')return '#CE9C40';if(f==='ffpkg')return '#A27AD8';return '#6498F0';}"
+"function famOf(g){var f=all.filter(function(m){return m.format==='pkg'&&!isBase(m)&&m.familyKey===g.familyKey;});"
+"f.sort(function(a,b){return rank(a.role)-rank(b.role);});return f;}"
+"function famPanel(g){var p=document.createElement('div');p.className='fampanel';"
+"var box=document.createElement('div');box.className='fambox';"
+"famOf(g).forEach(function(m){box.appendChild(card(m,1));});"
+"p.appendChild(box);return p;}"
 "function card(g,sub){var d=document.createElement('div');d.className=sub?'member':'card';"
-"var im=(!sub&&g.hasIcon)?'<img src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'';"
+"var im=(!sub)?(g.hasIcon?'<img src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'<div class=big>🎮</div>'):'';"
 "var meta=esc(g.titleId||'');if(g.version)meta+=' v'+esc(g.version);"
 "if(g.sizeText)meta+=' &middot; '+esc(g.sizeText);"
 "var badge=sub?'<span class=rb>'+esc(g.role)+'</span>':'';"
@@ -1094,20 +1121,17 @@ static const char UI_HTML[] =
 "w.appendChild(b);d.appendChild(w);return d;}"
 "if(kind==='images'){"
 "var cov=g.hasIcon?'<img src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'<div class=big>'+imgIcon(g.format)+'</div>';"
-"var fb='<span style=\"display:inline-block;background:'+fmtColor(g.format)+';color:#fff;font-size:12px;font-weight:bold;border-radius:4px;padding:2px 8px\">'+esc((g.format||'img').toUpperCase())+'</span>';"
+"var fb='<span style=\"display:inline-block;background:'+fmtColor(g.format)+';color:#fff;font-size:15px;font-weight:bold;border-radius:4px;padding:3px 10px\">'+esc((g.format||'img').toUpperCase())+'</span>';"
 "d.innerHTML=cov+'<div class=t>'+esc(g.title)+'</div><div class=m>'+fb+' &middot; '+esc(g.sizeText||'')+'</div>';"
 "var cb=document.createElement('button');cb.textContent='Copy to homebrew';"
 "cb.onclick=function(ev){ev.stopPropagation();copyImg(g.id,g.file||g.title,g.size||0);};d.appendChild(cb);return d;}"
-"var fam=all.filter(function(m){return m.format==='pkg'&&!isBase(m)&&m.familyKey===g.familyKey;});"
-"fam.sort(function(a,b){return rank(a.role)-rank(b.role);});"
+"var fam=famOf(g);"
 "var cnt=fam.length?'<span class=fc>'+fam.length+' add-on'+(fam.length>1?'s':'')+'</span>':'';"
 "d.innerHTML=im+'<div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div>'+cnt;"
 "var ib=document.createElement('button');ib.textContent='Install';"
 "ib.onclick=function(ev){ev.stopPropagation();install(g.id,g.title);};d.appendChild(ib);"
+"if(openFam===g.familyKey&&fam.length)d.className+=' sel';"
 "d.onclick=function(){openFam=(openFam===g.familyKey)?null:g.familyKey;render();};"
-"if(openFam===g.familyKey&&fam.length){var box=document.createElement('div');box.className='fambox';"
-"fam.forEach(function(m){box.appendChild(card(m,1));});"
-"var wrap=document.createElement('div');wrap.appendChild(d);wrap.appendChild(box);return wrap;}"
 "return d;}"
 "function render(){grid.innerHTML='';var list;"
 "if(kind==='images'){list=all.filter(function(g){return g.format!=='pkg'&&matchP(g)&&matchQ(g);});"
@@ -1119,7 +1143,8 @@ static const char UI_HTML[] =
 "bases.sort(function(a,b){return a.title.toLowerCase()<b.title.toLowerCase()?-1:1;});"
 "if(!bases.length){msg.textContent=all.length?'No match.':'Library is empty — tick Publish library in PKG Sender.';return;}"
 "msg.textContent=bases.length+' games';"
-"bases.forEach(function(g){grid.appendChild(card(g,0));});}"
+"bases.forEach(function(g){grid.appendChild(card(g,0));"
+"if(openFam===g.familyKey&&famOf(g).length)grid.appendChild(famPanel(g));});}"
 "async function resolvePc(){"
 "try{var r=await fetch('/api/pc');var j=await r.json();"
 "if(j.pc&&j.age>=0&&j.age<15){pcEl.value=j.pc;pcstat.textContent='PC: '+j.pc+' (auto)';return j.pc;}}catch(e){}"
@@ -1188,6 +1213,8 @@ static const char UI_HTML[] =
 "var x=await r.text();fm.textContent=x;inp.value='';fsLoad();}"
 "catch(ex){fm.textContent='Error: '+ex;}}"
 "document.getElementById('save').onclick=load;"
+"document.getElementById('reload').onclick=load;"
+"pcEl.onkeydown=function(ev){if(ev.key==='Enter')load();};"
 "document.getElementById('mkbtn').onclick=fsMkdir;"
 "document.getElementById('up').onclick=function(){var roots=['/data','/mnt/usb0','/mnt/usb1','/mnt/usb2','/mnt/usb3'];"
 "if(roots.indexOf(fpath)>=0)return;var i=fpath.lastIndexOf('/');fpath=i>0?fpath.substring(0,i):'/data';fsLoad();};"
@@ -1196,6 +1223,10 @@ static const char UI_HTML[] =
 "qEl.oninput=render;"
 "var chips=document.getElementById('chips').children;"
 "for(var i=0;i<chips.length;i++)(function(c){c.onclick=function(){plat=c.getAttribute('data-p');"
+"var kd=document.getElementById('kind');"
+"if(plat==='PS4'){kd.style.display='none';kind='games';"
+"for(var k=0;k<kinds.length;k++)kinds[k].className=kinds[k].getAttribute('data-k')==='games'?'on':'';}"
+"else kd.style.display='';"
 "for(var k=0;k<chips.length;k++)chips[k].className='';c.className='on';render();};})(chips[i]);"
 "var kinds=document.getElementById('kind').children;"
 "for(var j=0;j<kinds.length;j++)(function(c){c.onclick=function(){kind=c.getAttribute('data-k');"
@@ -1884,6 +1915,7 @@ handle_client(int fd)
 		snprintf(out, sizeof(out), "{\"pc\":\"%s\",\"age\":%ld}",
 		    g_pc_addr, age);
 		send_json(fd, out);
+#ifdef ENABLE_FILES_TAB
 	} else if (!strcmp(method, "GET") &&
 	           !strncmp(path, "/api/fs/list", sizeof("/api/fs/list") - 1)) {
 		char rpath[PATH_MAX_V], local[PATH_MAX_V];
@@ -2099,6 +2131,11 @@ handle_client(int fd)
 		} else {
 			send_text(fd, "error:move failed");
 		}
+#else
+	/* Files tab temporarily disabled — kept for later work. */
+	} else if (!strncmp(path, "/api/fs/", 8)) {
+		send_text(fd, "error:file-explorer-disabled");
+#endif
 	} else if (!strcmp(method, "GET")) {
 		send_html(fd, UI_HTML);
 	} else if (!strcmp(method, "POST") &&
@@ -2221,6 +2258,7 @@ handle_client(int fd)
 			    "Loopayeh: received %s", base);
 			notify_user(toast);
 		}
+#ifdef ENABLE_FILES_TAB
 	} else if (!strcmp(method, "POST") &&
 	           !strncmp(path, "/api/fs/delete", 14)) {
 		char rpath[PATH_MAX_V], local[PATH_MAX_V];
@@ -2246,6 +2284,7 @@ handle_client(int fd)
 				send_text(fd, "error:delete failed");
 			}
 		}
+#endif /* ENABLE_FILES_TAB */
 	} else if (!strcmp(method, "POST") &&
 	           !strncmp(path, "/api/files/pull", 15)) {
 		char url[URL_MAX], rpath[PATH_MAX_V], local[PATH_MAX_V];
@@ -2332,8 +2371,7 @@ beacon_start(void)
 #define PC_ANNOUNCE_PORT 12802
 #define PC_ANNOUNCE_MAGIC "PKGSENDER-PC "
 
-static char g_pc_addr[64] = "";
-static volatile time_t g_pc_seen = 0;
+/* g_pc_addr / g_pc_seen are declared near the top (install_job_t block). */
 
 static void *
 pc_listen_worker(void *arg)

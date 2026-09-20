@@ -8,4 +8,7 @@
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.8" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="ps4_dpi_payload.bin" />
+  </ItemGroup>
 </Project>

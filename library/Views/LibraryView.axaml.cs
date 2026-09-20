@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -47,6 +48,10 @@ public partial class LibraryView : UserControl
     private readonly Avalonia.Threading.DispatcherTimer _liveTimer = new();
     private bool _liveBusy;
     private bool _detecting;
+    // Search debounce: typing restarts this; only the last term filters.
+    private readonly Avalonia.Threading.DispatcherTimer _searchTimer = new();
+    private const int SearchDebounceMs = 1500;
+    private int _filterGen;
 
     public LibraryView()
     {
@@ -76,13 +81,20 @@ public partial class LibraryView : UserControl
         };
         _m.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(LibraryViewModel.Search) ||
-                e.PropertyName == nameof(LibraryViewModel.HideExtras))
+            if (e.PropertyName == nameof(LibraryViewModel.Search))
+            {
+                // Debounced: typing must never filter per keystroke.
+                _searchTimer.Stop();
+                _searchTimer.Start();
+            }
+            else if (e.PropertyName == nameof(LibraryViewModel.HideExtras))
                 ApplyFilter();
+            else if (e.PropertyName == nameof(LibraryViewModel.SequentialMode))
+                RefreshReorderFlags();
         };
         this.FindControl<Button>("BtnAddFolder").Click += async (_, _) => await AddFolderAsync("Add a folder to scan for games");
-        this.FindControl<Button>("BtnClearSearch").Click += (_, _) => _m.Search = "";
-        this.FindControl<Button>("BtnClearFilter").Click += (_, _) => _m.Search = "";
+        this.FindControl<Button>("BtnClearSearch").Click += (_, _) => { _m.Search = ""; ImmediateFilter(); };
+        this.FindControl<Button>("BtnClearFilter").Click += (_, _) => { _m.Search = ""; ImmediateFilter(); };
         this.FindControl<CheckBox>("CompactBox").Checked += (_, _) => SetCompact(true);
         this.FindControl<CheckBox>("CompactBox").Unchecked += (_, _) => SetCompact(false);
         this.FindControl<Button>("BtnExpand").Click += (_, _) =>
@@ -119,6 +131,10 @@ public partial class LibraryView : UserControl
         _liveTimer.Interval = TimeSpan.FromSeconds(5);
         _liveTimer.Tick += async (_, _) => await LiveProbeAsync();
         _liveTimer.Start();
+        // Search debounce: big archives freeze on per-keystroke filtering.
+        // Typing restarts the timer; the filter runs once, off the UI thread.
+        _searchTimer.Interval = TimeSpan.FromMilliseconds(SearchDebounceMs);
+        _searchTimer.Tick += (_, _) => { _searchTimer.Stop(); _ = RefreshFilterAsync(); };
         _ = LiveProbeAsync();
         if (!s.AboutShown || PkgSender.Program.ForceAbout)
         {
@@ -153,19 +169,8 @@ public partial class LibraryView : UserControl
         this.FindControl<Button>("BtnUpdate").Click += async (_, _) => await CheckUpdatesAsync(manual: true);
         if (s.UpdateCheck)
             _ = CheckUpdatesAsync(manual: false);
-        this.FindControl<Button>("BtnStop").Click += (_, _) =>
-        {
-            lock (_runLock)
-            {
-                _stop = true; // worker aborts waits, rows stay visible
-            }
-            _copyStop = true;
-            // Copies run on the receiver: tell it to stop the pull worker
-            // (partial file stays, Copy again offers resume).
-            _ = LoopDPI.Core.ConsoleClient.PullCancelAsync(_m.PsIp);
-            _m.Status = "Stopping…";
-        };
         this.FindControl<Button>("BtnShare").Click += (_, _) => ToggleShare();
+        this.FindControl<Button>("BtnPauseAll").Click += (_, _) => TogglePauseAll();
         this.FindControl<Button>("BtnClearDone").Click += (_, _) =>
         {
             // Finished rows go; stuck rows (sending/queued with no live
@@ -446,12 +451,24 @@ public partial class LibraryView : UserControl
         try
         {
             var (apiOk, busy) = await LoopDPI.Core.NetDiscovery.ProbeAsync(ps);
+            string ps4mode = "offline";
+            if (!apiOk)
+            {
+                // No receiver — but a PS4 (RPI/etaHEN/GoldHEN) also installs
+                // fine; detect it so the dot isn't red while pushes work.
+                ps4mode = await LoopDPI.Core.Ps4Installer.DetectAsync(ps);
+            }
             Post(() =>
             {
-                if (!apiOk)
+                if (!apiOk && ps4mode == "offline")
                 {
                     _m.TestResult = "● No receiver";
                     dot.Foreground = new SolidColorBrush(Color.Parse("#E06C5B"));
+                }
+                else if (!apiOk)
+                {
+                    _m.TestResult = $"● Connected (PS4 {ps4mode})";
+                    dot.Foreground = new SolidColorBrush(Color.Parse("#6FCF7B"));
                 }
                 else
                 {
@@ -469,6 +486,7 @@ public partial class LibraryView : UserControl
         {
             // Toggle: click again to go back to the full library.
             _m.Search = _m.Search == g.FamilyKey ? "" : g.FamilyKey;
+            ImmediateFilter();
             e.Handled = true;
         }
     }
@@ -482,6 +500,7 @@ public partial class LibraryView : UserControl
                     case "BtnDown": MoveRow(qi, +1); break;
                     case "BtnRemove": RemoveRow(qi); break;
                     case "BtnPause": TogglePause(qi); break;
+                    case "BtnRetry": ResendRow(qi); break;
                     default: ResumeRow(qi); break;
                 }
         }
@@ -538,6 +557,7 @@ public partial class LibraryView : UserControl
         lock (_runLock)
         {
             wasPending = _runQueue.Remove(row);
+            _stallSkips.Remove(row);
             if (wasPending)
             {
                 _speedSamples.Remove(row);
@@ -694,6 +714,103 @@ public partial class LibraryView : UserControl
         });
     }
 
+    /// <summary>
+    /// The single global queue switch: pauses everything (resumable) or
+    /// resumes everything. Per-row ⏸ still exists; failed rows keep their
+    /// own ⟳ Retry. Replaces the old Stop + Resume-all pair.
+    /// Called on UI thread.
+    /// </summary>
+    private void TogglePauseAll()
+    {
+        bool anyRunning = _m.Queue.Any(q => !q.IsSent && !q.IsPaused &&
+            q.State is "queued" or "sending" or "copying");
+        if (anyRunning)
+        {
+            // Pause everything, row by row (same resumable path as ⏸).
+            foreach (var q in _m.Queue.ToList())
+            {
+                if (!q.IsSent && !q.IsPaused &&
+                    q.State is "queued" or "sending" or "copying")
+                    TogglePause(q);
+            }
+            _m.Status = "Paused — press ▶ Resume all to continue.";
+        }
+        else
+        {
+            // Resume everything: unpause, requeue orphans, wake the worker.
+            bool startWorker = false;
+            lock (_runLock)
+            {
+                _stop = false;
+                _copyStop = false;
+                foreach (var q in _m.Queue)
+                {
+                    if (q.IsSent)
+                        continue;
+                    bool wasCopyPaused = q.State == "copying" && q.IsPaused;
+                    q.IsPaused = false;
+                    if (q.State is "queued" or "sending")
+                    {
+                        if (!_runQueue.Contains(q) && !_activeIds.ContainsKey(q))
+                            _runQueue.Add(q);
+                        if (q.State == "sending")
+                        {
+                            q.State = "queued";
+                            q.Message = "waiting…";
+                        }
+                    }
+                    if (wasCopyPaused)
+                    {
+                        q.Message = "copying…";
+                        _ = LoopDPI.Core.ConsoleClient.PullPauseAsync(_m.PsIp, false);
+                    }
+                }
+                if (!_running)
+                {
+                    _running = true;
+                    startWorker = true;
+                }
+            }
+            if (startWorker)
+                _ = RunQueueAsync();
+            _m.Status = "Resuming…";
+        }
+        UpdateQueueLabel();
+    }
+
+    /// <summary>
+    /// Reinstall of a failed row: straight to the FRONT of the queue with a
+    /// fresh served counter (PushOneAsync zeroes it), so it is the next
+    /// thing pushed. Called on UI thread.
+    /// </summary>
+    private void ResendRow(QueueItem row)
+    {
+        if (row.Game == null || row.State != "failed")
+            return;
+        bool startWorker = false;
+        lock (_runLock)
+        {
+            _stop = false;
+            _stallSkips.Remove(row);
+            _runQueue.Remove(row);
+            _runQueue.Insert(0, row);
+            if (!_running)
+            {
+                _running = true;
+                startWorker = true;
+            }
+        }
+        if (startWorker)
+            _ = RunQueueAsync();
+        row.IsPaused = false;
+        row.State = "queued";
+        row.Message = "waiting… (retrying next)";
+        row.Percent = 0;
+        row.Speed = "";
+        row.CanResume = false;
+        UpdateQueueLabel();
+    }
+
     private TopLevel Top => TopLevel.GetTopLevel(this)!;
 
     private void Post(Action a) => Dispatcher.UIThread.Post(a);
@@ -847,6 +964,7 @@ public partial class LibraryView : UserControl
                 }
                 LinkFamilies();
                 WriteIconDiag();
+                BumpLibraryVersion();
                 ApplyFilter();
                 _m.Status = _all.Count == 0
                     ? (_roots.Count == 0 ? "Add a folder or drives first." : "No PKG files found.")
@@ -872,12 +990,14 @@ public partial class LibraryView : UserControl
         });
         try
         {
-            bool online = await ConsoleClient.IsOnlineAsync(_m.PsIp);
+            string ps4mode = await Ps4Installer.DetectAsync(_m.PsIp);
+            bool online = ps4mode != "offline" || await ConsoleClient.IsOnlineAsync(_m.PsIp);
+            string where = ps4mode != "offline" ? $"PS4 {ps4mode}" : "pkg-receiver";
             Post(() =>
             {
                 _m.Status = online
-                    ? $"Connected — pkg-receiver is online at {_m.PsIp}:12800."
-                    : $"No connection — nothing answers at {_m.PsIp}:12800. Is pkg-receiver running on the console?";
+                    ? $"Connected — {where} is online at {_m.PsIp}."
+                    : $"No connection — nothing answers at {_m.PsIp}:12800/9090. Is pkg-receiver or GoldHEN Payload Server running?";
                 _m.TestResult = online ? "● Connected" : "● No connection";
                 this.FindControl<TextBlock>("TestResultText").Foreground = online
                     ? new SolidColorBrush(Color.Parse("#6FCF7B"))
@@ -969,29 +1089,121 @@ public partial class LibraryView : UserControl
         }
     }
 
-    private void ApplyFilter()
+    /// <summary>Immediate filter entry (platform/sort/toggles/scan).
+    /// Typing goes through the debounce timer instead.</summary>
+    private void ApplyFilter() => _ = RefreshFilterAsync();
+
+    /// <summary>Skip the debounce (clear buttons, family links).</summary>
+    private void ImmediateFilter()
     {
+        _searchTimer.Stop();
+        _ = RefreshFilterAsync();
+    }
+
+    /// <summary>
+    /// Filter off the UI thread: snapshot, compute in background, apply on
+    /// the UI thread. Stale generations (fast typing) are dropped.
+    /// </summary>
+    private async Task RefreshFilterAsync()
+    {
+        int gen = Interlocked.Increment(ref _filterGen);
+        GameItem[] snapshot;
         string q = (_m.Search ?? "").Trim().ToLowerInvariant();
+        string raw = (_m.Search ?? "").Trim();
         string pf = _m.PlatformFilter ?? "All";
-        var list = new List<GameItem>();
-        foreach (var g in _all)
+        string sort = _m.SortMode ?? "Name";
+        bool hideExtras = _m.HideExtras;
+        try { snapshot = _all.ToArray(); }
+        catch { return; }
+        // Repeat of the exact same view (e.g. Show all twice): skip the
+        // GroupBy/sort entirely and re-apply the cached rows.
+        string key = $"{_allVersion}|{q}|{pf}|{sort}|{hideExtras}";
+        if (_filterCacheValid && key == _filterCacheKey)
+        {
+            var cached = _filterCache;
+            Post(() =>
+            {
+                if (gen != Volatile.Read(ref _filterGen))
+                    return;
+                ApplyFilteredRows(cached, q, raw, snapshot.Length);
+            });
+            return;
+        }
+        var computed = await Task.Run(() => ComputeFiltered(snapshot, q, pf, sort, hideExtras));
+        if (gen != Volatile.Read(ref _filterGen))
+            return; // superseded by newer input
+        Post(() =>
+        {
+            if (gen != Volatile.Read(ref _filterGen))
+                return;
+            _filterCacheKey = key;
+            _filterCache = computed.Rows;
+            _filterCacheValid = true;
+            _countCache = computed.Counts;
+            _countCacheVer = _allVersion;
+            ApplyFilteredRows(computed.Rows, q, raw, snapshot.Length);
+        });
+    }
+
+    /// <summary>Push computed rows into the visible list + labels (UI thread).</summary>
+    private void ApplyFilteredRows(List<GameItem> rows, string q, string raw, int total)
+    {
+        _m.Games.Clear();
+        foreach (var g in rows)
+            _m.Games.Add(g);
+        bool filtering = q.Length > 0;
+        _m.IsFiltering = filtering;
+        _m.FilterLabel = filtering
+            ? (_m.Games.Count == 0
+                ? $"🔍 No matches for \"{raw}\""
+                : $"🔍 Filtered by \"{raw}\" — {_m.Games.Count} of {total} shown")
+            : "";
+        UpdateGamesLabel();
+    }
+
+    // Filter cache: Show-all (and any repeated view) skips recompute.
+    // Bumped whenever the library contents change (scan).
+    private int _allVersion;
+    private string _filterCacheKey = "";
+    private List<GameItem> _filterCache = new();
+    private bool _filterCacheValid;
+    private (int Ps5, int Ps4, int Fams) _countCache;
+    private int _countCacheVer = -1;
+
+    /// <summary>Call after _all changes (UI thread): drops cached views.</summary>
+    private void BumpLibraryVersion()
+    {
+        _allVersion++;
+        _filterCacheValid = false;
+    }
+
+    /// <summary>Pure filter+sort over a snapshot (background-thread safe).</summary>
+    private static (List<GameItem> Rows, (int Ps5, int Ps4, int Fams) Counts) ComputeFiltered(GameItem[] all, string q, string pf, string sort, bool hideExtras)
+    {
+        int ps5 = 0, ps4 = 0;
+        var famSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var a in all)
+        {
+            if (a.Platform.StartsWith("PS5")) ps5++;
+            else if (a.Platform.StartsWith("PS4")) ps4++;
+            famSet.Add(a.FamilyKey);
+        }
+        var list = new List<GameItem>(all.Length);
+        foreach (var g in all)
         {
             if ((pf == "PS5" && !g.Platform.StartsWith("PS5")) ||
                 (pf == "PS4" && !g.Platform.StartsWith("PS4")))
                 continue;
-            if (q.Length == 0 || g.Title.ToLowerInvariant().Contains(q) ||
-                g.ContentId.ToLowerInvariant().Contains(q) ||
-                g.FamilyKey.ToLowerInvariant().Contains(q) ||
-                Path.GetFileName(g.Path).ToLowerInvariant().Contains(q))
+            if (q.Length == 0 || g.SearchHay.Contains(q, StringComparison.Ordinal))
                 list.Add(g);
         }
         // Hide DLC/updates mode: collapse each family to its base Game(s).
         // Clicking 🔗 sets Search = FamilyKey -> exact family view, which
         // bypasses the collapse so updates/DLCs become visible.
-        if (_m.HideExtras)
+        if (hideExtras)
         {
             bool isFamilyView = q.Length > 0 &&
-                _all.Any(a => string.Equals(a.FamilyKey.ToLowerInvariant(), q, StringComparison.Ordinal));
+                all.Any(a => string.Equals(a.FamilyKey.ToLowerInvariant(), q, StringComparison.Ordinal));
             if (!isFamilyView)
             {
                 var collapsed = new List<GameItem>();
@@ -1027,44 +1239,31 @@ public partial class LibraryView : UserControl
             return ordered.FirstOrDefault(g => g.Role == "Game") ?? ordered[0];
         }
         var families = list.GroupBy(g => g.FamilyKey).ToList();
-        IEnumerable<IGrouping<string, GameItem>> orderedFams = _m.SortMode switch
+        IEnumerable<IGrouping<string, GameItem>> orderedFams = sort switch
         {
             "Size ↓" => families.OrderByDescending(f => Rep(f).SizeBytes).ThenBy(f => Rep(f).Title, StringComparer.OrdinalIgnoreCase),
             "Size ↑" => families.OrderBy(f => Rep(f).SizeBytes).ThenBy(f => Rep(f).Title, StringComparer.OrdinalIgnoreCase),
             _ => families.OrderBy(f => Rep(f).Title, StringComparer.OrdinalIgnoreCase),
         };
-        _m.Games.Clear();
+        var ordered = new List<GameItem>(list.Count);
         foreach (var fam in orderedFams)
             foreach (var g in MemberOrder(fam))
-                _m.Games.Add(g);
-        bool filtering = q.Length > 0;
-        _m.IsFiltering = filtering;
-        if (filtering)
-        {
-            string raw = (_m.Search ?? "").Trim();
-            _m.FilterLabel = _m.Games.Count == 0
-                ? $"🔍 No matches for \"{raw}\""
-                : $"🔍 Filtered by \"{raw}\" — {_m.Games.Count} of {_all.Count} shown";
-        }
-        else
-        {
-            _m.FilterLabel = "";
-        }
-        UpdateGamesLabel();
+                ordered.Add(g);
+        return (ordered, (ps5, ps4, famSet.Count));
     }
 
     private void UpdateGamesLabel()
     {
-        int ps5 = _all.Count(g => g.Platform.StartsWith("PS5"));
-        int ps4 = _all.Count(g => g.Platform.StartsWith("PS4"));
-        int fams = _all.Select(g => g.FamilyKey).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        // Counts come from the last background compute (cached) — no more
+        // full passes over a huge _all on the UI thread per keystroke.
+        var (ps5, ps4, fams) = _countCache;
         var sel = this.FindControl<ListBox>("GamesList").SelectedItems;
         int selCount = sel?.Count ?? 0;
         string scope = (_m.PlatformFilter ?? "All") switch
         {
             "PS5" => $"{_m.Games.Count} PS5 games",
             "PS4" => $"{_m.Games.Count} PS4 games",
-            _ => $"{_all.Count} games in {fams} families ({ps5} PS5 • {ps4} PS4)",
+            _ => $"{_m.Games.Count} games in {fams} families ({ps5} PS5 • {ps4} PS4)",
         };
         _m.GamesLabel = selCount > 0 ? $"{scope} • {selCount} selected" : scope;
     }
@@ -1076,6 +1275,19 @@ public partial class LibraryView : UserControl
         int done = _m.Queue.Count(q => q.State == "sent");
         int failed = _m.Queue.Count(q => q.State == "failed");
         _m.QueueLabel = _m.Queue.Count == 0 ? "Queue is empty" : $"{done}/{_m.Queue.Count} sent" + (failed > 0 ? $", {failed} failed" : "");
+        RefreshReorderFlags();
+        // Global switch follows the rows: anything running -> offer Pause
+        // all, everything parked -> offer Resume all. Control touch via Post
+        // (this also runs on worker threads).
+        bool anyRunning = _m.Queue.Any(q => !q.IsSent && !q.IsPaused &&
+            q.State is "queued" or "sending" or "copying");
+        string label = anyRunning ? "⏸ Pause all" : "▶ Resume all";
+        Post(() =>
+        {
+            var b = this.FindControl<Button>("BtnPauseAll");
+            if (b != null)
+                b.Content = label;
+        });
     }
 
     private static bool IsPkg(GameItem g) => g.Format == "pkg" && !g.IsFolder;
@@ -1273,7 +1485,7 @@ public partial class LibraryView : UserControl
                     }
                     if (complete && dlg.Result == CopyChoiceDialog.Choice.Resume)
                     {
-                        var doneRow = new QueueItem { Game = g, State = "sent", Message = "already there ✓", Percent = 100 };
+                        var doneRow = new QueueItem { Game = g, State = "sent", Message = "already there ✓", Percent = 100, IsSent = true };
                         _m.Queue.Add(doneRow);
                         UpdateQueueLabel();
                         ok++;
@@ -1331,9 +1543,7 @@ public partial class LibraryView : UserControl
                         var (exists, size) = await LoopDPI.Core.ConsoleClient.StatAsync(_m.PsIp, remote);
                         if (exists && size == g.SizeBytes && g.SizeBytes > 0)
                         {
-                            row.Percent = 100;
-                            row.State = "sent";
-                            row.Message = Program.FormatSize(size) + " verified ✓";
+                            Post(() => MarkSent(row, Program.FormatSize(size) + " verified ✓"));
                         }
                         else
                         {
@@ -1402,7 +1612,30 @@ public partial class LibraryView : UserControl
         if (_server != null)
             return;
         _server = new RangeFileServer(_registry);
-        _server.FileRequested += _ => { _lastServe = DateTime.UtcNow; Post(UpdateShareLabel); };
+        _server.FileRequested += id =>
+        {
+            _lastServe = DateTime.UtcNow;
+            Post(UpdateShareLabel);
+            try
+            {
+                File.AppendAllText(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "PkgSender", "push-debug.log"),
+                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [http] console requested /pkg/{id}\n");
+            }
+            catch { }
+        };
+        _server.RequestLog = line =>
+        {
+            try
+            {
+                File.AppendAllText(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "PkgSender", "push-debug.log"),
+                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [http] {line}\n");
+            }
+            catch { }
+        };
         _server.Start();
     }
 
@@ -1585,7 +1818,11 @@ public partial class LibraryView : UserControl
                     if (_stop)
                         break;
                     // Paused rows stay queued until started again.
-                    toPush = _runQueue.Where(q => !q.IsPaused).ToList();
+                    // Sequential (PS4) takes ONE row at a time so the rest
+                    // stay in _runQueue: reorderable, pausable, skippable.
+                    // (Draining all at once orphaned them from MoveRow.)
+                    var waiting = _runQueue.Where(q => !q.IsPaused).ToList();
+                    toPush = _m.SequentialMode ? waiting.Take(1).ToList() : waiting;
                     foreach (var q in toPush)
                         _runQueue.Remove(q);
                     hasActive = _activeIds.Count > 0;
@@ -1660,6 +1897,29 @@ public partial class LibraryView : UserControl
         }
     }
 
+    /// <summary>Full PKG header for the GoldHEN wire format; falls back to library fields.</summary>
+    private static PkgInfo BuildPkgInfo(GameItem g)
+    {
+        try
+        {
+            using var fs = File.Open(g.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var info = PkgReader.Read(fs);
+            if (info != null)
+                return info;
+        }
+        catch { }
+        return new PkgInfo
+        {
+            Title = g.Title,
+            ContentId = g.ContentId,
+            TitleId = g.TitleId,
+            Version = g.Version,
+            Platform = g.Platform,
+            PackageSize = g.SizeBytes,
+            IconData = g.IconData,
+        };
+    }
+
     /// <summary>Register + push a single PKG; download is tracked by MonitorTick.</summary>
     private async Task PushOneAsync(QueueItem item)
     {
@@ -1693,6 +1953,70 @@ public partial class LibraryView : UserControl
             item.Message = "pushing…";
             _m.Status = $"Installing PKG: {item.Game.Title}";
         });
+        // PS4 first: RPI -> etaHEN -> GoldHEN (same setup as the DPI app).
+        // PS4 detection is cheap; PS5 items skip it.
+        if (item.Game.IsPs4 || (item.Game.Platform ?? "").StartsWith("PS4"))
+        {
+            string mode = await Ps4Installer.DetectAsync(_m.PsIp);
+            if (mode != "offline")
+            {
+                Post(() => { item.Message = $"pushing via PS4 {mode}…"; });
+                PkgInfo pkg = BuildPkgInfo(item.Game);
+                // GoldHEN needs a JSON manifest URL (like DPI's /json/{id}.json),
+                // not the raw file URL — raw gives BGFT 0x80990033.
+                string pushUrl = url;
+                if (mode == "goldhen")
+                {
+                    _server!.RegisterManifest(id, Ps4Installer.BuildManifest(url, pkg.PackageSize));
+                    pushUrl = _server!.ManifestUrlFor(_m.PcIp, id);
+                }
+                var (ok4, method4, reply4) = mode == "goldhen"
+                    ? (await Ps4Installer.PushGoldHenAsync(_m.PsIp, _m.PcIp, pushUrl, pkg, _server!.Port)) switch
+                    {
+                        var r => (r.Ok, "goldhen", r.Reply)
+                    }
+                    : mode == "etahen"
+                        ? (await Ps4Installer.PushEtaHenAsync(_m.PsIp, pushUrl)) switch
+                        {
+                            var r => (r.Ok, "etahen", r.Reply)
+                        }
+                        : (await Ps4Installer.PushRpiAsync(_m.PsIp, pushUrl)) switch
+                        {
+                            var r => (r.Ok, "rpi", r.Reply)
+                        };
+                try
+                {
+                    File.AppendAllText(
+                        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                            "PkgSender", "push-debug.log"),
+                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{method4}] ok={ok4} url={pushUrl} reply={reply4}\n");
+                }
+                catch { }
+                lock (_runLock)
+                {
+                    if (!ok4)
+                    {
+                        Post(() =>
+                        {
+                            item.State = "failed";
+                            item.Message = reply4.Length > 120 ? reply4[..120] : reply4;
+                            _m.Status = $"PS4 {method4} push failed: {reply4}";
+                            UpdateQueueLabel();
+                        });
+                        return;
+                    }
+                    _activeIds[item] = id;
+                    _activeIdle[item] = 0;
+                    _activeSince[item] = DateTime.UtcNow;
+                }
+                Post(() =>
+                {
+                    item.Message = $"queued on PS4 ({method4})…";
+                    UpdateQueueLabel();
+                });
+                return;
+            }
+        }
         var (ok, reply) = await ConsoleClient.PushAsync(_m.PsIp, url, item.Game.Title, iconUrl);
         lock (_runLock)
         {
@@ -1734,6 +2058,7 @@ public partial class LibraryView : UserControl
             {
                 row.State = "failed";
                 row.Message = msg;
+                row.Speed = "";
                 row.CanResume = true;
                 UpdateQueueLabel();
             }
@@ -1746,6 +2071,107 @@ public partial class LibraryView : UserControl
         }
     }
 
+    /// <summary>
+    /// ▲▼ reorder handles are visible only in PS4 sequential mode and only
+    /// on still-queued rows: sent/active/failed/copy rows never show them.
+    /// Runs inside UpdateQueueLabel, so it follows every state change.
+    /// </summary>
+    private void RefreshReorderFlags()
+    {
+        bool ps4 = _m.SequentialMode;
+        foreach (var q in _m.Queue)
+            q.CanReorder = ps4 && !q.IsSent && q.State == "queued";
+    }
+
+    /// <summary>
+    /// Download-complete check with a 1 MiB short-count tolerance: the file
+    /// server counts bytes only after a successful socket write, so a client
+    /// disconnect on the last chunk can leave the counter up to one buffer
+    /// (1 MiB) short of a fully-downloaded file. Without the tolerance the
+    /// sequential gate waits forever and the queue never advances.
+    /// </summary>
+    private static bool IsDownloaded(long delta, long size)
+    {
+        if (size <= 0)
+            return true;
+        if (delta >= size)
+            return true;
+        return size - delta <= 1024 * 1024;
+    }
+
+    /// <summary>
+    /// Mark a row sent/finished: green flag, full bar, moved to the bottom
+    /// of the queue so active rows stay together on top. Must run on the
+    /// UI thread (all call sites are inside Post).
+    /// </summary>
+    private void MarkSent(QueueItem row, string message)
+    {
+        row.State = "sent";
+        row.Percent = 100;
+        row.Speed = "";
+        row.Message = message;
+        row.IsSent = true;
+        row.CanReorder = false;
+        lock (_runLock) { _stallSkips.Remove(row); }
+        int i = _m.Queue.IndexOf(row);
+        if (i >= 0 && i < _m.Queue.Count - 1)
+            _m.Queue.Move(i, _m.Queue.Count - 1);
+        UpdateQueueLabel();
+    }
+
+    /// <summary>Skip reasons for ParkSkip (stall accounting).</summary>
+    private const int MaxSkips = 3;
+    // Stall windows are short on purpose: a skipped row retries later
+    // (up to MaxSkips), so a false positive only reorders, never loses.
+    // Console-side pause = silence, so instant detection is impossible;
+    // ~30s of zero bytes is the practical minimum for "it's stuck".
+    private static readonly TimeSpan StallSkipAfter = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan NeverPulledSkipAfter = TimeSpan.FromSeconds(60);
+    private readonly Dictionary<QueueItem, int> _stallSkips = new();
+
+    /// <summary>
+    /// Park a stuck/paused row and let the queue move on: it goes back to
+    /// the end of _runQueue for a later retry instead of failing and
+    /// halting everything behind it. After MaxSkips stalls it really fails.
+    /// Call sites are worker threads; UI changes go through Post.
+    /// </summary>
+    private void ParkSkip(QueueItem item, string message, bool countSkip)
+    {
+        bool giveUp = false;
+        lock (_runLock)
+        {
+            _activeIds.Remove(item);
+            _activeIdle.Remove(item);
+            _activeSince.Remove(item);
+            if (countSkip)
+            {
+                _stallSkips.TryGetValue(item, out int n);
+                n++;
+                _stallSkips[item] = n;
+                giveUp = n >= MaxSkips;
+            }
+            if (!giveUp && !_runQueue.Contains(item))
+                _runQueue.Add(item);
+        }
+        Post(() =>
+        {
+            if (giveUp)
+            {
+                item.State = "failed";
+                item.Message = message + " — retry manually";
+                item.CanResume = true;
+            }
+            else
+            {
+                item.State = "queued";
+                item.Message = message;
+                item.Speed = "";
+                item.CanResume = false;
+            }
+            UpdateQueueLabel();
+        });
+    }
+
     private async Task WaitForInstallAsync(QueueItem item)
     {
         string id;
@@ -1754,13 +2180,25 @@ public partial class LibraryView : UserControl
             if (!_activeIds.TryGetValue(item, out id!))
                 return;
         }
+        // PS4 consoles (RPI/etaHEN/GoldHEN) have no /api/status with our
+        // busy semantics — never poll it there, or the queue stalls.
+        bool isPs4 = item.Game.IsPs4 || (item.Game.Platform ?? "").StartsWith("PS4");
         long size = item.Game.SizeBytes;
         DateTime pushedAt = DateTime.UtcNow;
+        DateTime lastProgress = DateTime.UtcNow;
+        long lastDelta = 0;
         for (;;)
         {
-            if (_stop || item.IsPaused)
+            if (_stop)
             {
-                FailStopped(item, _stop ? "stopped" : "paused");
+                FailStopped(item, "stopped");
+                return;
+            }
+            if (item.IsPaused)
+            {
+                // App-side pause parks the row (no fail): the queue moves on
+                // to the next game, this one retries when unpaused.
+                ParkSkip(item, "paused — skipped for now", countSkip: false);
                 return;
             }
             long delta = _server!.ServedFor(id);
@@ -1773,41 +2211,49 @@ public partial class LibraryView : UserControl
                     row.Percent = size <= 0 ? 100 : Math.Min(100, delta * 100.0 / size);
                     row.Message = delta == 0
                         ? "queued on console…"
-                        : $"{Program.FormatSize(delta)} / {Program.FormatSize(size)}" +
-                          (string.IsNullOrEmpty(rsp) ? "" : $" • {rsp}");
+                        : $"{Program.FormatSize(delta)} / {Program.FormatSize(size)}";
+                    row.Speed = rsp;
                 }
             });
-            if (delta >= size)
+            if (IsDownloaded(delta, size))
                 break;
-            if (delta == 0 && (DateTime.UtcNow - pushedAt).TotalMinutes >= 30)
+            if (delta != lastDelta)
             {
-                Post(() =>
-                {
-                    row.State = "failed";
-                    row.Message = "console never pulled it";
-                    row.CanResume = true;
-                    UpdateQueueLabel();
-                });
-                lock (_runLock)
-                {
-                    _activeIds.Remove(item);
-                    _activeIdle.Remove(item);
-                    _activeSince.Remove(item);
-                }
+                lastDelta = delta;
+                lastProgress = DateTime.UtcNow;
+            }
+            if (delta == 0 && (DateTime.UtcNow - pushedAt) >= NeverPulledSkipAfter)
+            {
+                // Console never pulled (push missed / console-side pause):
+                // skip to the next game, retry this one later.
+                ParkSkip(item, "console never pulled it — retrying later", countSkip: true);
+                return;
+            }
+            if (delta > 0 && (DateTime.UtcNow - lastProgress) >= StallSkipAfter)
+            {
+                ParkSkip(item, "download stalled — retrying later", countSkip: true);
                 return;
             }
             await Task.Delay(1000);
         }
         // Downloaded — now wait for the install itself to finish.
+        // PS4 has no status endpoint: give the console a moment to start
+        // the install, then let the next push land.
         DateTime t0 = DateTime.UtcNow;
         bool wasBusy = false;
         bool confirmed = false;
-        bool supported = true;
+        bool supported = !isPs4;
+        if (supported)
         for (;;)
         {
-            if (_stop || item.IsPaused)
+            if (_stop)
             {
-                FailStopped(item, _stop ? "stopped" : "paused");
+                FailStopped(item, "stopped");
+                return;
+            }
+            if (item.IsPaused)
+            {
+                ParkSkip(item, "paused — skipped for now", countSkip: false);
                 return;
             }
             bool busy;
@@ -1857,9 +2303,7 @@ public partial class LibraryView : UserControl
             }
             else
             {
-                row.State = "sent";
-                row.Percent = 100;
-                row.Message = confirmed ? "installed ✓ (check console)" : "sent to console queue";
+                MarkSent(row, confirmed ? "installed ✓ (check console)" : "sent to console queue");
             }
                 lock (_runLock)
                 {
@@ -1970,7 +2414,7 @@ public partial class LibraryView : UserControl
             {
                 if (!_activeIds.ContainsKey(item))
                     continue;
-                if (delta >= size)
+                if (IsDownloaded(delta, size))
                 {
                     if (++_activeIdle[item] >= 5)
                         done.Add(item);
@@ -1999,6 +2443,7 @@ public partial class LibraryView : UserControl
         if (done.Count == 0 && giveUp.Count == 0)
         {
             UpdateEta(snap.Count, totalSize, totalServed);
+            PassiveProgressTick();
             return;
         }
         lock (_runLock)
@@ -2014,13 +2459,7 @@ public partial class LibraryView : UserControl
         foreach (var item in done)
         {
             var row = item;
-            Post(() =>
-            {
-                row.State = "sent";
-                row.Percent = 100;
-                row.Message = "sent to console queue";
-                UpdateQueueLabel();
-            });
+            Post(() => MarkSent(row, "sent to console queue"));
         }
         foreach (var item in giveUp)
         {
@@ -2045,6 +2484,64 @@ public partial class LibraryView : UserControl
             }
         }
         UpdateEta(remCount, remSize, remServed);
+        PassiveProgressTick();
+    }
+
+    /// <summary>
+    /// Display-only progress for rows the console pulls outside the active
+    /// set (e.g. resumed on the console while the app parked the row):
+    /// shows bytes/speed/bar without touching the state machine — never
+    /// blocks or reorders anything.
+    /// </summary>
+    private readonly Dictionary<QueueItem, long> _passiveLast = new();
+
+    private void PassiveProgressTick()
+    {
+        List<(QueueItem Row, long Delta, long Size)> passive = new();
+        List<QueueItem> rows;
+        try { rows = _m.Queue.ToList(); }
+        catch { return; }
+        lock (_runLock)
+        {
+            if (_server == null)
+                return;
+            // Drop samples for rows that left the queue.
+            foreach (var k in _passiveLast.Keys.ToList())
+                if (!rows.Contains(k))
+                    _passiveLast.Remove(k);
+            foreach (var q in rows)
+            {
+                if (q.IsSent || _activeIds.ContainsKey(q))
+                    continue;
+                if (q.State is not ("queued" or "sending"))
+                    continue;
+                if (q.Game == null)
+                    continue;
+                if (!_pathIds.TryGetValue(q.Game.Path, out string? pid) || pid == null)
+                    continue;
+                long delta = _server.ServedFor(pid);
+                // Show only fresh progress: a parked row with old bytes
+                // must keep its own message, not a fake "pulling…".
+                if (delta > 0 && (!_passiveLast.TryGetValue(q, out long prev) || delta != prev))
+                {
+                    _passiveLast[q] = delta;
+                    passive.Add((q, delta, q.Game.SizeBytes));
+                }
+            }
+        }
+        foreach (var (row, delta, size) in passive)
+        {
+            string rsp = TrackRowSpeed(row, delta);
+            Post(() =>
+            {
+                if (row.IsSent || row.State is not ("queued" or "sending"))
+                    return;
+                row.Percent = size <= 0 ? 100 : Math.Min(100, delta * 100.0 / size);
+                row.Message = $"{Program.FormatSize(delta)} / {Program.FormatSize(size)} (console pulling…)" +
+                    (string.IsNullOrEmpty(rsp) ? "" : $" • {rsp}");
+                row.Speed = rsp;
+            });
+        }
     }
 
     /// <summary>

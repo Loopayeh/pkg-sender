@@ -1,6 +1,8 @@
-# PKG Sender — PS4 / PS5
+# PS4 PS5 PKG Sender
 
-**PKG Sender** installs PlayStation packages over LAN: pick games on your PC, they queue up and install on the console. No USB juggling, no manual IP typing.
+**PKG Sender** installs PlayStation **PKG** files over LAN: pick games on your PC, they queue up and install on the console. No USB juggling, no manual IP typing. Yes — PS5 **PKG** games install fine, no FPKG patching needed on your side.
+
+> **Status:** PS5 installs work right now. PS4 support is being fixed (connection issues under investigation) — coming back soon.
 
 ## Download
 

@@ -82,6 +82,14 @@ public sealed class RangeFileServer : IDisposable
     /// <summary>Library rows served at GET /catalog (set by Publish library).</summary>
     public Func<IReadOnlyList<CatalogEntry>>? CatalogProvider { get; set; }
     public string CatalogUrlFor(string host) => $"http://{host}:{Port}/catalog";
+    /// <summary>PS4 GoldHEN JSON manifests (/json/{id}.json). Keyed by id.</summary>
+    private readonly ConcurrentDictionary<string, byte[]> _manifests = new();
+    public void RegisterManifest(string id, string json) =>
+        _manifests[id] = Encoding.UTF8.GetBytes(json);
+    public string ManifestUrlFor(string host, string id) =>
+        $"http://{host}:{Port}/json/{Uri.EscapeDataString(id)}.json";
+    /// <summary>Optional sink for every HTTP request line (diagnostics).</summary>
+    public Action<string>? RequestLog { get; set; }
 
     public void Start()
     {
@@ -172,6 +180,10 @@ public sealed class RangeFileServer : IDisposable
             }
             bool isHead = method == "HEAD";
             string noQuery = rawTarget.Split('?')[0];
+            string clientIp = "unknown";
+            try { clientIp = (cl.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "unknown"; } catch { }
+            void Log(string status) { try { RequestLog?.Invoke($"{clientIp} {method} {noQuery} -> {status}"); } catch { } }
+            Log("in");
             // /catalog: JSON library for the console browser (PKG only).
             if (noQuery.Equals("/catalog", StringComparison.OrdinalIgnoreCase))
             {
@@ -247,11 +259,31 @@ public sealed class RangeFileServer : IDisposable
                 }
                 return;
             }
+            // /json/{id}.json: PS4 GoldHEN PKG manifest (pieces list).
+            if (noQuery.StartsWith("/json/", StringComparison.OrdinalIgnoreCase) &&
+                noQuery.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                string mid = Uri.UnescapeDataString(noQuery["/json/".Length..^".json".Length]);
+                if (_manifests.TryGetValue(mid, out var mjson) && mjson.Length > 0)
+                {
+                    Log("manifest 200");
+                    await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nContent-Length: {mjson.Length}\r\nConnection: close\r\n\r\n", ct);
+                    if (!isHead)
+                    {
+                        try { await ns.WriteAsync(mjson, ct); } catch { }
+                    }
+                    return;
+                }
+                Log("manifest 404");
+                await WriteRaw(ns, "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
+                return;
+            }
             string id = "pkg";
             if (noQuery.StartsWith("/pkg/", StringComparison.OrdinalIgnoreCase))
                 id = Uri.UnescapeDataString(noQuery["/pkg/".Length..]);
             else if (!noQuery.Equals("/pkg", StringComparison.OrdinalIgnoreCase))
             {
+                Log("404");
                 await WriteRaw(ns, "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
                 return;
             }
@@ -259,6 +291,7 @@ public sealed class RangeFileServer : IDisposable
             if (!_files.TryGetValue(id, out var path) || !File.Exists(path) ||
                 _revoked.ContainsKey(id))
             {
+                Log("pkg 404");
                 await WriteRaw(ns, "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
                 return;
             }
@@ -327,6 +360,7 @@ public sealed class RangeFileServer : IDisposable
             }
 
             long length = end - start + 1;
+            Log(partial ? "pkg 206" : "pkg 200");
             var h = new StringBuilder();
             h.Append(partial ? "HTTP/1.0 206 Partial Content\r\n" : "HTTP/1.0 200 OK\r\n");
             if (partial)

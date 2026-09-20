@@ -13,6 +13,8 @@
     <views:Ps5CardPaddingConverter x:Key="Ps5CardPad"/>
     <views:SelectedBorderConverter x:Key="SelBorder"/>
     <views:FormatBadgeConverter x:Key="FormatBadge"/>
+    <views:SentRowBackgroundConverter x:Key="SentRowBg"/>
+    <views:SentStateTextConverter x:Key="SentStateFg"/>
   </UserControl.Resources>
   <Design.DataContext>
     <vm:LibraryViewModel/>
@@ -85,14 +87,14 @@
           <Button Grid.Column="1" Content="Send PKG" Name="BtnSend" MinWidth="150" FontWeight="Bold" Margin="0,0,8,0" IsEnabled="False" ToolTip.Tip="Send selected .pkg files to the console downloader"/>
           <Button Grid.Column="2" Content="Copy images" Name="BtnCopy" Classes="ghost" Margin="0,0,8,0" IsEnabled="False" ToolTip.Tip="Copy selected image files (.exfat/.ffpkg/.ffpfsc) to /data/homebrew on the console"/>
           <Button Grid.Column="3" Content="Share to console" Name="BtnShare" Classes="ghost" Margin="0,0,8,0" ToolTip.Tip="Show this library in the console browser (pkg remote installer page pulls the list + covers from this PC)"/>
-          <Button Grid.Column="4" Content="■ Stop" Name="BtnStop" Margin="0,0,8,0" ToolTip.Tip="Stop the running queue (keeps the rows)"/>
+          <Button Grid.Column="4" Content="⏸ Pause all" Name="BtnPauseAll" Classes="ghost" Margin="0,0,8,0" ToolTip.Tip="Pause everything (resumable) — becomes Resume all"/>
           <Button Grid.Column="5" Content="Clear done" Name="BtnClearDone" ToolTip.Tip="Remove finished rows only — never touches active downloads"/>
         </Grid>
       </Grid>
     </Border>
 
     <!-- body -->
-    <Grid Grid.Row="3" Name="BodyGrid" ColumnDefinitions="*,300" Margin="16,12">
+    <Grid Grid.Row="3" Name="BodyGrid" ColumnDefinitions="*,360" Margin="16,12">
       <Border Name="GamesPanel" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="1" CornerRadius="8" Padding="10">
         <Grid RowDefinitions="Auto,Auto,*">
           <Border Grid.Row="0" Name="FilterBanner" IsVisible="{Binding IsFiltering}"
@@ -172,7 +174,7 @@
           <ListBox Grid.Row="1" Name="QueueList" ItemsSource="{Binding Queue}" Background="Transparent" BorderThickness="0">
             <ListBox.ItemTemplate>
               <DataTemplate>
-                <Border Background="#2A2A2A" CornerRadius="8" Padding="10" Margin="0,0,0,8">
+                <Border Background="{Binding IsSent, Converter={StaticResource SentRowBg}}" CornerRadius="8" Padding="10" Margin="0,0,0,8">
                   <Grid ColumnDefinitions="Auto,*">
                     <Border Grid.Column="0" Width="46" Height="46" CornerRadius="6" ClipToBounds="True"
                             Background="#171717" Margin="0,0,10,0" VerticalAlignment="Top">
@@ -182,18 +184,21 @@
                       </Grid>
                     </Border>
                     <StackPanel Grid.Column="1" Spacing="4">
-                    <TextBlock Text="{Binding Game.Title}" FontWeight="Bold" FontSize="12" Foreground="#F1F3F8" TextTrimming="CharacterEllipsis" MaxLines="1"/>
-                    <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Text="{Binding State}" FontSize="11" Foreground="#4F8EF7" VerticalAlignment="Center"/>
-                      <TextBlock Grid.Column="1" Text="{Binding Message}" FontSize="11" Foreground="#8B93A5" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding Game.Title}" FontWeight="Bold" FontSize="12" Foreground="#F1F3F8" TextTrimming="CharacterEllipsis" MaxLines="1" ToolTip.Tip="{Binding Game.Title}"/>
+                    <Grid RowDefinitions="Auto,Auto">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="{Binding State}" FontSize="12" Foreground="{Binding IsSent, Converter={StaticResource SentStateFg}}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Speed}" FontSize="12" FontWeight="Bold" Foreground="#6FCF7B" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                      </Grid>
+                      <TextBlock Grid.Row="1" Text="{Binding Message}" FontSize="12" Foreground="#C6CBD8" VerticalAlignment="Center" TextWrapping="Wrap" MaxLines="2" ToolTip.Tip="{Binding Message}"/>
                     </Grid>
-                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" Height="6" CornerRadius="3" Foreground="#4F8EF7" Background="#171717"/>
+                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" Height="6" CornerRadius="3" Foreground="{Binding IsSent, Converter={StaticResource SentStateFg}}" Background="#171717"/>
                     <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
                       <Button Grid.Column="1" Name="BtnPause" Content="{Binding PauseText}" IsVisible="{Binding CanPause}" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Pause this item / start it again"/>
-                      <Button Grid.Column="2" Name="BtnUp" Content="▲" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Move up (queued items only)"/>
-                      <Button Grid.Column="3" Name="BtnDown" Content="▼" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Move down (queued items only)"/>
+                      <Button Grid.Column="2" Name="BtnUp" Content="▲" IsVisible="{Binding CanReorder}" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Move up (queued items only)"/>
+                      <Button Grid.Column="3" Name="BtnDown" Content="▼" IsVisible="{Binding CanReorder}" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Move down (queued items only)"/>
                       <Button Grid.Column="4" Name="BtnRemove" Content="✕" Padding="10,4" FontSize="11" Classes="ghost" Margin="0,0,4,0" ToolTip.Tip="Remove from queue (active download is cancelled, resumable)"/>
-                      <Button Grid.Column="5" Content="Resume" IsVisible="{Binding CanResume}" HorizontalAlignment="Right" Padding="12,4" FontSize="11"/>
+                      <Button Grid.Column="5" Name="BtnRetry" Content="⟳ Reinstall" IsVisible="{Binding CanResend}" HorizontalAlignment="Right" Padding="12,4" FontSize="11" ToolTip.Tip="Push this one again right away (next in line)"/>
                     </Grid>
                     </StackPanel>
                   </Grid>

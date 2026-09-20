@@ -59,3 +59,24 @@ public sealed class Ps5CardPaddingConverter : IValueConverter
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => throw new NotSupportedException();
 }
+
+/// <summary>Finished queue rows get a green tint so they read as a group,
+/// fully separated from the active rows above.</summary>
+public sealed class SentRowBackgroundConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is true ? new SolidColorBrush(Color.Parse("#1E3A2B")) : new SolidColorBrush(Color.Parse("#2A2A2A"));
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>State text of finished rows turns green, active stays blue.</summary>
+public sealed class SentStateTextConverter : IValueConverter
+{
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => value is true ? new SolidColorBrush(Color.Parse("#6FCF7B")) : new SolidColorBrush(Color.Parse("#7AA5FF"));
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using ReactiveUI;
@@ -33,6 +34,11 @@ public sealed class GameItem : ReactiveObject
     public int FamilyCount { get; set; }
     public bool HasFamily { get; set; }
     public string FamilyTip { get; set; } = "";
+    /// <summary>Lowercased search haystack, built once (title+ids+file name).
+    /// Filtering thousands of rows per keystroke must not re-lowercase.</summary>
+    private string? _searchHay;
+    public string SearchHay => _searchHay ??=
+        (Title + "\n" + ContentId + "\n" + FamilyKey + "\n" + System.IO.Path.GetFileName(Path)).ToLowerInvariant();
     // Shape language: cards always rectangular; only the PS5 cover image is round.
     public CornerRadius CardRadius { get; init; }
     public CornerRadius ImageRadius { get; init; }
@@ -49,7 +55,7 @@ public sealed class QueueItem : ReactiveObject
     public string State
     {
         get => _state;
-        set { this.RaiseAndSetIfChanged(ref _state, value); this.RaisePropertyChanged(nameof(CanPause)); }
+        set { this.RaiseAndSetIfChanged(ref _state, value); this.RaisePropertyChanged(nameof(CanPause)); this.RaisePropertyChanged(nameof(CanResend)); }
     }
 
     private double _percent;
@@ -58,8 +64,15 @@ public sealed class QueueItem : ReactiveObject
     private string _message = "";
     public string Message { get => _message; set => this.RaiseAndSetIfChanged(ref _message, value); }
 
+    private string _speed = "";
+    public string Speed { get => _speed; set => this.RaiseAndSetIfChanged(ref _speed, value); }
+
     private bool _canResume;
-    public bool CanResume { get => _canResume; set => this.RaiseAndSetIfChanged(ref _canResume, value); }
+    public bool CanResume { get => _canResume; set { this.RaiseAndSetIfChanged(ref _canResume, value); this.RaisePropertyChanged(nameof(CanResend)); } }
+
+    /// <summary>Full re-push of a failed row (fresh counter + new push).
+    /// Resume instead continues the same URL from the last byte.</summary>
+    public bool CanResend => CanResume && State == "failed";
 
     private bool _isPaused;
     public bool IsPaused
@@ -67,6 +80,14 @@ public sealed class QueueItem : ReactiveObject
         get => _isPaused;
         set { this.RaiseAndSetIfChanged(ref _isPaused, value); this.RaisePropertyChanged(nameof(PauseText)); }
     }
+
+    private bool _isSent;
+    /// <summary>Finished rows: green tint + pinned to the bottom of the queue.</summary>
+    public bool IsSent { get => _isSent; set => this.RaiseAndSetIfChanged(ref _isSent, value); }
+
+    private bool _canReorder;
+    /// <summary>▲▼ handles: PS4 sequential mode only, never on finished rows.</summary>
+    public bool CanReorder { get => _canReorder; set => this.RaiseAndSetIfChanged(ref _canReorder, value); }
 
     /// <summary>Pause button glyph: ⏸ while running, ▶ while paused.</summary>
     public string PauseText => IsPaused ? "▶" : "⏸";
