@@ -47,6 +47,41 @@ def rows_get(rows, *names):
     return ""
 
 
+def _fmt_of(path):
+    low = path.lower()
+    if os.path.isdir(path):
+        return "folder"
+    if low.endswith(".ffpfsc"):
+        return "ffpfsc"
+    if low.endswith(".ffpkg"):
+        return "ffpkg"
+    if low.endswith(".exfat"):
+        return "exfat"
+    if low.endswith(".pkg"):
+        return "pkg"
+    return os.path.splitext(low)[1].lstrip(".") or "file"
+
+
+def _inner_title_id(path):
+    """Title-id from the single inner file of an .ffpfsc (PPSAxxxxx)."""
+    try:
+        if not path.lower().endswith(".ffpfsc"):
+            return ""
+        from pathlib import Path as _P
+        from mkpfs.pfs import open_inner_file_view as _oiv
+        r = _oiv(_P(path))
+        if not r:
+            return ""
+        try:
+            r[1].close()
+        except Exception:
+            pass
+        stem = os.path.splitext(os.path.basename(str(r[2])))[0]
+        return stem if stem[:4].upper() == "PPSA" else ""
+    except Exception:
+        return ""
+
+
 def main(argv):
     if len(argv) < 2:
         print(json.dumps({"ok": False, "error": "usage: pkg_header.py <path> [--icon-out <file>]"}))
@@ -72,6 +107,22 @@ def main(argv):
     try:
         r = pv.parse_pkg(path)
     except Exception as ex:
+        # ffpfsc whose inner file is .ffpkg (UFS, e.g. Returnal): no
+        # exFAT walk possible, so fall back to the inner name for the
+        # title-id. Format stays by extension, icon stays empty.
+        tid = _inner_title_id(path)
+        if tid:
+            print(json.dumps({
+                "ok": True,
+                "title": tid,
+                "title_id": tid,
+                "content_id": "",
+                "version": "",
+                "platform": "PS5",
+                "description": "[PS5 %s] %s" % (_fmt_of(path), tid),
+                "format": _fmt_of(path),
+            }))
+            return 0
         print(json.dumps({"ok": False, "error": "parse failed: %s" % ex}))
         return 1
     if not isinstance(r, dict) or "error" in r:
