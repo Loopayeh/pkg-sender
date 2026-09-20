@@ -1731,6 +1731,8 @@ handle_client(int fd)
 			close(fd);
 			return;
 		}
+	/* /api/dbg must not record itself, or it can only ever show itself */
+	if (strncmp(path, "/api/dbg", 8) != 0)
 		snprintf(g_last_req, sizeof(g_last_req), "%s %s", method, path);
 	}
 
