@@ -205,6 +205,18 @@ public partial class LibraryView : UserControl
             btnCopy.IsEnabled = hasImg;
             btnSend.FontWeight = hasPkg ? FontWeight.Bold : FontWeight.Normal;
             btnCopy.FontWeight = hasImg ? FontWeight.Bold : FontWeight.Normal;
+            // Active action goes blue, like Send: Copy images earns the
+            // accent as soon as an image is in the selection.
+            if (hasImg)
+            {
+                btnCopy.Background = new SolidColorBrush(Color.Parse("#4F8EF7"));
+                btnCopy.Foreground = new SolidColorBrush(Color.Parse("#FFFFFF"));
+            }
+            else
+            {
+                btnCopy.ClearValue(Button.BackgroundProperty);
+                btnCopy.ClearValue(Button.ForegroundProperty);
+            }
             UpdateGamesLabel();
         };
         // Dense grid: columns follow the panel width so cards always fill
