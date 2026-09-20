@@ -185,7 +185,7 @@ installer_init(void)
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
 /* bump on every behavior change; the page shows receiver vs page tags */
-#define RECEIVER_BUILD "20260920-07"
+#define RECEIVER_BUILD "20260920-08"
 
 __asm__(
 ".section .rodata\n"
@@ -307,8 +307,9 @@ typedef struct install_job {
 /* active install count for GET /api/status (multi-PKG queue pacing) */
 static volatile int g_active_installs = 0;
 
-/* last PC auto-announce (UDP 12802), re-served as GET /api/pc.
- * Defined with storage below; tentative here for handle_client. */
+/* last raw request line, for /api/dbg */
+static char g_last_req[256] = "";
+/* last PC auto-announce (UDP 12802), re-served as GET /api/pc. */
 static char g_pc_addr[64];
 static volatile time_t g_pc_seen;
 
@@ -1728,6 +1729,7 @@ handle_client(int fd)
 			close(fd);
 			return;
 		}
+		snprintf(g_last_req, sizeof(g_last_req), "%s %s", method, path);
 	}
 
 #ifdef TEST_ONLY
@@ -1827,6 +1829,13 @@ handle_client(int fd)
 	} else if (!strcmp(method, "GET") &&
 	           !strncmp(path, "/api/version", 12)) {
 		send_json(fd, "{\"build\":\"" RECEIVER_BUILD "\"}");
+	} else if (!strcmp(method, "GET") &&
+	           !strncmp(path, "/api/dbg", 8)) {
+		char out[320], esc[256];
+
+		json_escape(g_last_req, esc, sizeof(esc));
+		snprintf(out, sizeof(out), "{\"last\":\"%s\"}", esc);
+		send_json(fd, out);
 	} else if (!strcmp(method, "GET") &&
 	           !strncmp(path, "/api/status", 11)) {
 		char out[256];
