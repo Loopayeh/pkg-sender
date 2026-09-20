@@ -185,7 +185,7 @@ installer_init(void)
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
 /* bump on every behavior change; the page shows receiver vs page tags */
-#define RECEIVER_BUILD "20260920-09"
+#define RECEIVER_BUILD "20260920-10"
 
 __asm__(
 ".section .rodata\n"
@@ -1864,7 +1864,7 @@ handle_client(int fd)
 		    g_pc_addr, age);
 		send_json(fd, out);
 	} else if (!strcmp(method, "GET") &&
-	           !strncmp(path, "/api/fs/list", 13)) {
+	           !strncmp(path, "/api/fs/list", sizeof("/api/fs/list") - 1)) {
 		char rpath[PATH_MAX_V], local[PATH_MAX_V];
 		char escpath[PATH_MAX_V * 2];
 		DIR *dp;
@@ -1963,7 +1963,7 @@ handle_client(int fd)
 			}
 		}
 	} else if (!strcmp(method, "GET") &&
-	           !strncmp(path, "/api/fs/info", 13)) {
+	           !strncmp(path, "/api/fs/info", sizeof("/api/fs/info") - 1)) {
 		char rpath[PATH_MAX_V], local[PATH_MAX_V];
 		char escname[512];
 		struct stat st;
@@ -2023,7 +2023,7 @@ handle_client(int fd)
 				send_json(fd, out);
 		}
 	} else if (!strcmp(method, "POST") &&
-	           !strncmp(path, "/api/fs/rename", 15)) {
+	           !strncmp(path, "/api/fs/rename", sizeof("/api/fs/rename") - 1)) {
 		char rfrom[PATH_MAX_V], rto[PATH_MAX_V];
 		char from[PATH_MAX_V], to[PATH_MAX_V];
 
@@ -2042,7 +2042,7 @@ handle_client(int fd)
 			send_text(fd, "error:rename failed");
 		}
 	} else if (!strcmp(method, "POST") &&
-	           !strncmp(path, "/api/fs/copy", 13)) {
+	           !strncmp(path, "/api/fs/copy", sizeof("/api/fs/copy") - 1)) {
 		char rsrc[PATH_MAX_V], rdst[PATH_MAX_V];
 		char src[PATH_MAX_V], dst[PATH_MAX_V];
 
@@ -2059,7 +2059,7 @@ handle_client(int fd)
 			send_text(fd, "error:copy failed");
 		}
 	} else if (!strcmp(method, "POST") &&
-	           !strncmp(path, "/api/fs/move", 13)) {
+	           !strncmp(path, "/api/fs/move", sizeof("/api/fs/move") - 1)) {
 		char rsrc[PATH_MAX_V], rdst[PATH_MAX_V];
 		char src[PATH_MAX_V], dst[PATH_MAX_V];
 
