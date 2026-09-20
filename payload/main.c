@@ -185,7 +185,7 @@ installer_init(void)
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
 /* bump on every behavior change; the page shows receiver vs page tags */
-#define RECEIVER_BUILD "20260920-08"
+#define RECEIVER_BUILD "20260920-09"
 
 __asm__(
 ".section .rodata\n"
@@ -1163,7 +1163,9 @@ static const char UI_HTML[] =
 "fm.textContent='Loading...';fl.innerHTML='';"
 "try{var r=await fetch('/api/fs/list?path='+encodeURIComponent(fpath));"
 "var txt=await r.text();"
-"if(txt.charAt(0)!=='{'){fm.textContent='Reply: '+txt.substring(0,120);return;}"
+"if(txt.charAt(0)!=='{'){fm.textContent='Reply: '+txt.substring(0,60);"
+"try{var g=await fetch('/api/dbg');var gj=await g.text();fm.textContent+=' | prev: '+gj.substring(0,120);}catch(ex){}"
+"return;}"
 "var j=JSON.parse(txt);fm.textContent=j.entries.length+' entries'+(j.truncated?' (truncated)':'');"
 "j.entries.forEach(function(e){fl.appendChild(frow(e));});}"
 "catch(ex){fm.textContent='Error: '+ex;}}"
