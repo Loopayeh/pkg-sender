@@ -1226,18 +1226,37 @@ public partial class LibraryView : UserControl
             if (started)
             {
                 ok++;
+                // Copy rows live in the queue below with their own progress
+                // bar (State "copying": no pause/resume — those are install-only).
+                var row = new QueueItem { Game = g, State = "copying", Message = "copying…", Percent = 0 };
+                _m.Queue.Add(row);
+                UpdateQueueLabel();
                 // Follow the copy: poll the receiver's pull progress so a
                 // 36GB image doesn't look dead while it downloads.
                 for (int t = 0; t < 7200; t++)
                 {
                     await Task.Delay(3000);
+                    if (!_m.Queue.Contains(row))
+                        break; // user removed the row
                     var (active, name, got, want) = await LoopDPI.Core.ConsoleClient.GetPullAsync(_m.PsIp);
                     if (!active)
+                    {
+                        row.Percent = 100;
+                        row.State = "sent";
+                        row.Message = want > 0 ? Program.FormatSize(want) + " copied" : "copied";
                         break;
-                    _m.Status = want > 0
-                        ? $"Copying {g.Title}: {got * 100 / want}% ({Program.FormatSize(got)} / {Program.FormatSize(want)})"
-                        : $"Copying {g.Title}: {Program.FormatSize(got)}";
+                    }
+                    row.Percent = want > 0 ? Math.Min(100, got * 100.0 / want) : 0;
+                    row.Message = want > 0
+                        ? $"{Program.FormatSize(got)} / {Program.FormatSize(want)}"
+                        : Program.FormatSize(got);
                 }
+                if (row.State == "copying" && _m.Queue.Contains(row))
+                {
+                    row.State = "failed";
+                    row.Message = "stalled — retry Copy images";
+                }
+                UpdateQueueLabel();
             }
             else
                 _m.Status = $"Copy failed for {g.Title}: local={localCheck} console={CopyHint(reply)}";
