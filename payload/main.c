@@ -1040,12 +1040,13 @@ typedef struct pull_job {
 
 /* pull progress, visible in GET /api/status while a copy runs */
 static volatile int g_pull_active = 0;
+static volatile int g_pull_paused = 0;
 static volatile long long g_pull_got = 0;
 static volatile long long g_pull_want = -1;
 static char g_pull_name[128];
 
 /* 0 = ok, 1 = skipped (same size present), -1 = error */
-#define PULL_SEGS 4
+#define PULL_SEGS 8
 #define PULL_CHUNK (256 * 1024)
 
 typedef struct pull_seg {
@@ -1195,6 +1196,8 @@ pull_seg_worker(void *arg)
 		size_t want = (size_t)(left < PULL_CHUNK ? left : PULL_CHUNK);
 		size_t got = 0;
 
+		while (g_pull_paused)
+			sleep(1);
 		n = recv(s, hb, want, 0);
 		if (n < 0) {
 			if (errno == EINTR)
@@ -1377,6 +1380,8 @@ pull_download(const char *url, const char *local)
 			return -1;
 		}
 		for (;;) {
+			while (g_pull_paused)
+				sleep(1);
 			n = recv(s, hb, PULL_CHUNK, 0);
 			if (n < 0) {
 				if (errno == EINTR)
@@ -1559,18 +1564,27 @@ handle_client(int fd)
 		} else {
 			send_json(fd, "{\"exists\":false,\"size\":0}");
 		}
+	} else if (!strcmp(method, "POST") &&
+	           !strncmp(path, "/api/pull/pause", 15)) {
+		long long paused = 1;
+
+		json_long(body, "paused", &paused);
+		g_pull_paused = paused ? 1 : 0;
+		send_json(fd, g_pull_paused ? "{\"ok\":true,\"paused\":true}"
+		    : "{\"ok\":true,\"paused\":false}");
 	} else if (!strcmp(method, "GET") &&
 	           !strncmp(path, "/api/status", 11)) {
 		char out[256];
 
 		snprintf(out, sizeof(out), "{\"busy\":%s,\"active\":%d,"
 		    "\"pull\":%s,\"pullName\":\"%s\","
-		    "\"pullGot\":%lld,\"pullWant\":%lld}",
+		    "\"pullGot\":%lld,\"pullWant\":%lld,\"pullPaused\":%s}",
 		    g_active_installs > 0 ? "true" : "false",
 		    g_active_installs,
 		    g_pull_active ? "true" : "false",
 		    g_pull_active ? g_pull_name : "",
-		    g_pull_got, g_pull_want);
+		    g_pull_got, g_pull_want,
+		    g_pull_paused ? "true" : "false");
 		send_json(fd, out);
 	} else if (!strcmp(method, "GET") &&
 	           !strncmp(path, "/api/pc", 7)) {

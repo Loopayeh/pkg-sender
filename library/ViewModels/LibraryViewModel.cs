@@ -71,7 +71,7 @@ public sealed class QueueItem : ReactiveObject
     public string PauseText => IsPaused ? "▶" : "⏸";
 
     /// <summary>Pause only makes sense before the row is done.</summary>
-    public bool CanPause => State is "queued" or "sending";
+    public bool CanPause => State is "queued" or "sending" or "copying";
 }
 
 public sealed class LibraryViewModel : ReactiveObject

@@ -96,9 +96,9 @@ public static class ConsoleClient
     }
 
     /// <summary>
-    /// Pull-copy progress from GET /api/status: (active, name, got, want).
+    /// Pull-copy progress from GET /api/status: (active, name, got, want, paused).
     /// </summary>
-    public static async Task<(bool Active, string Name, long Got, long Want)> GetPullAsync(string psIp)
+    public static async Task<(bool Active, string Name, long Got, long Want, bool Paused)> GetPullAsync(string psIp)
     {
         try
         {
@@ -108,11 +108,30 @@ public static class ConsoleClient
             string name = StrField(body, "pullName");
             long got = LongField(body, "pullGot");
             long want = LongField(body, "pullWant");
-            return (active, name, got, want);
+            bool paused = body.Contains("\"pullPaused\":true");
+            return (active, name, got, want, paused);
         }
         catch
         {
-            return (false, "", 0, -1);
+            return (false, "", 0, -1, false);
+        }
+    }
+
+    /// <summary>Pause/unpause the receiver's running pull copy.</summary>
+    public static async Task<bool> PullPauseAsync(string psIp, bool paused)
+    {
+        try
+        {
+            using var c = NewClient(10);
+            string json = $"{{\"paused\":{(paused ? 1 : 0)}}}";
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var resp = await c.PostAsync($"http://{psIp}:12800/api/pull/pause", content);
+            string body = await resp.Content.ReadAsStringAsync();
+            return body.Contains("\"ok\"");
+        }
+        catch
+        {
+            return false;
         }
     }
 

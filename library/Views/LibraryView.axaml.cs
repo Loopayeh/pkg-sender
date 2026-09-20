@@ -513,6 +513,10 @@ public partial class LibraryView : UserControl
     /// </summary>
     private void RemoveRow(QueueItem row)
     {
+        // Dropping a paused copy row must unpause the receiver, or its
+        // worker would sleep forever with pull marked active.
+        if (row.State == "copying" && row.IsPaused)
+            _ = LoopDPI.Core.ConsoleClient.PullPauseAsync(_m.PsIp, false);
         string? revokeId = null;
         bool wasPending;
         lock (_runLock)
@@ -569,6 +573,12 @@ public partial class LibraryView : UserControl
     /// </summary>
     private void TogglePause(QueueItem row)
     {
+        // Copy rows pause the receiver's pull worker, not the install queue.
+        if (row.State == "copying")
+        {
+            ToggleCopyPause(row);
+            return;
+        }
         bool startWorker = false;
         lock (_runLock)
         {
@@ -612,6 +622,25 @@ public partial class LibraryView : UserControl
         }
         if (startWorker)
             _ = RunQueueAsync();
+    }
+
+    /// <summary>
+    /// Pause/start a copy row: flips the receiver's pull-paused flag.
+    /// The poll loop keeps reporting (frozen bytes) until resume.
+    /// Called on UI thread.
+    /// </summary>
+    private async void ToggleCopyPause(QueueItem row)
+    {
+        bool paused = !row.IsPaused;
+        if (await LoopDPI.Core.ConsoleClient.PullPauseAsync(_m.PsIp, paused))
+        {
+            row.IsPaused = paused;
+            row.Message = paused ? "paused" : "copying…";
+        }
+        else
+        {
+            _m.Status = "Pause signal failed — is the receiver reachable?";
+        }
     }
 
     /// <summary>
@@ -1240,7 +1269,7 @@ public partial class LibraryView : UserControl
                     await Task.Delay(3000);
                     if (!_m.Queue.Contains(row))
                         break; // user removed the row
-                    var (active, name, got, want) = await LoopDPI.Core.ConsoleClient.GetPullAsync(_m.PsIp);
+                    var (active, name, got, want, isPaused) = await LoopDPI.Core.ConsoleClient.GetPullAsync(_m.PsIp);
                     if (!active)
                     {
                         // Worker is done (or died fast) — verify by size,
@@ -1269,7 +1298,7 @@ public partial class LibraryView : UserControl
                     lastGot = got;
                     lastT = now;
                     row.Percent = want > 0 ? Math.Min(100, got * 100.0 / want) : 0;
-                    row.Message = want > 0
+                    row.Message = isPaused ? "paused" : want > 0
                         ? $"{Program.FormatSize(got)} / {Program.FormatSize(want)}{spd}"
                         : $"{Program.FormatSize(got)}{spd}";
                 }
