@@ -74,7 +74,7 @@ function isBase(g){return g.role==='Game';}
 function card(g,sub){
 var d=document.createElement('div');d.className=sub?'member':'card';
 if(sub){
-var badge=g.role==='Patch'?'<span class=bdg style="background:#A27AD8;color:#fff">Patch</span>':(g.role==='DLC'?'<span class=bdg style="background:#E8A34C;color:#171717">DLC</span>':'');
+var badge=g.role==='Patch'?'<span class=bdg style="background:#E17B7B;color:#171717">Patch</span>':(g.role==='DLC'?'<span class=bdg style="background:#E8A34C;color:#171717">DLC</span>':'');
 d.innerHTML='<div><div class=t>'+esc(g.title)+'</div><div class=m>'+esc(g.titleId)+' v'+esc(g.version||'')+' &middot; '+esc(g.sizeText)+'</div></div>';
 var w=document.createElement('div');w.innerHTML=badge;
 var b=document.createElement('button');b.textContent='Install';
