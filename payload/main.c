@@ -39,9 +39,12 @@
 #include <time.h>
 #include <pthread.h>
 #include <dlfcn.h>
+#include <signal.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/sysctl.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -1117,6 +1120,49 @@ beacon_start(void)
 		pthread_detach(tid);
 }
 
+/* ── Process identity + self-replacement ───────────────────────────────
+ * Name our main thread so process managers (e.g. itsPLK's
+ * ps5-payload-manager, which lists ki_comm/ki_tdname) show us as
+ * pkg-receiver.elf, and kill any previous instance on startup so
+ * re-injecting just works without a console reboot. */
+#define RECEIVER_NAME "pkg-receiver.elf"
+
+/* pid of another live process whose thread name matches ours, else -1 */
+static pid_t
+find_receiver_peer(void)
+{
+	int mib[4] = { 1, 14, 8, 0 };
+	pid_t self = getpid();
+	pid_t found = -1;
+	size_t len = 0;
+	uint8_t *buf, *p, *end;
+
+	if (sysctl(mib, 4, NULL, &len, NULL, 0) != 0 || len == 0)
+		return -1;
+	buf = malloc(len);
+	if (!buf)
+		return -1;
+	if (sysctl(mib, 4, buf, &len, NULL, 0) != 0) {
+		free(buf);
+		return -1;
+	}
+	end = buf + len;
+	for (p = buf; p + (int)sizeof(int) <= end;) {
+		int sz = *(int *)p;
+		pid_t pid;
+		if (sz < 468 || p + sz > end)
+			break;
+		pid = *(pid_t *)(p + 72);
+		if (pid != self && pid > 0 &&
+		    strncmp((char *)(p + 447), RECEIVER_NAME,
+		        sizeof(RECEIVER_NAME)) == 0)
+			found = pid;
+		p += sz;
+	}
+	free(buf);
+	return found;
+}
+
 int
 main(void)
 {
@@ -1125,6 +1171,18 @@ main(void)
 	struct sockaddr_in sa;
 
 	notify_user("Loopayeh: stage main entered");
+
+	syscall(SYS_thr_set_name, -1, RECEIVER_NAME);
+
+	/* replace any previous instance: re-inject needs no reboot */
+	for (;;) {
+		pid_t old = find_receiver_peer();
+		if (old <= 0)
+			break;
+		if (kill(old, SIGKILL) != 0)
+			break;
+		sleep(1);
+	}
 
 	srv = socket(AF_INET, SOCK_STREAM, 0);
 	notify_user("Loopayeh: stage socket done");
