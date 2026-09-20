@@ -73,6 +73,28 @@ public static class ConsoleClient
         }
     }
 
+    /// <summary>
+    /// Ask the receiver to pull a PC file into /data/homebrew itself
+    /// (Images tab copy, now also from the PC app). The PC file server
+    /// must serve the URL (/pkg/{id} covers every registered file).
+    /// </summary>
+    public static async Task<(bool Ok, string Reply)> PullAsync(string psIp, string url, string remotePath)
+    {
+        try
+        {
+            using var c = NewClient();
+            string json = $"{{\"url\":\"{JsonEscape(url)}\",\"path\":\"{JsonEscape(remotePath)}\"}}";
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var resp = await c.PostAsync($"http://{psIp}:12800/api/files/pull", content);
+            string body = await resp.Content.ReadAsStringAsync();
+            return (body.Contains("started") || body.Contains("\"ok\""), body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     private static string JsonEscape(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");
 }

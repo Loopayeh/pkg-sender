@@ -142,6 +142,7 @@ public partial class LibraryView : UserControl
         this.FindControl<Button>("BtnTest").Click += async (_, _) => await TestConnectionAsync();
         this.FindControl<Button>("BtnScan").Click += async (_, _) => await ScanFoldersAsync();
         this.FindControl<Button>("BtnSend").Click += (_, _) => EnqueuePkgs();
+        this.FindControl<Button>("BtnCopy").Click += async (_, _) => await CopyImagesAsync();
         this.FindControl<Button>("BtnAbout").Click += async (_, _) =>
         {
             var owner = Top as Window;
@@ -190,6 +191,8 @@ public partial class LibraryView : UserControl
             foreach (var g in _all)
                 g.IsSelected = selected.Contains(g);
             this.FindControl<Button>("BtnSend").IsEnabled = (box.SelectedItems?.Count ?? 0) > 0;
+            this.FindControl<Button>("BtnCopy").IsEnabled =
+                box.SelectedItems?.Cast<GameItem>().Any(g => g.Role == "Image") == true;
             UpdateGamesLabel();
         };
         // Dense grid: columns follow the panel width so cards always fill
@@ -204,11 +207,16 @@ public partial class LibraryView : UserControl
                     grid.Columns = cols;
             }
         };
-        // Double-click a card: queue that game straight away (same rules as Send PKG).
-        this.FindControl<ListBox>("GamesList").DoubleTapped += (_, e) =>
+        // Double-click a card: PKGs queue for install, images copy to homebrew.
+        this.FindControl<ListBox>("GamesList").DoubleTapped += async (_, e) =>
         {
             if ((e.Source as Control)?.DataContext is GameItem g)
-                EnqueueGames(new[] { g });
+            {
+                if (g.Role == "Image")
+                    await CopyImagesAsync(new[] { g });
+                else
+                    EnqueueGames(new[] { g });
+            }
         };
         // 🔗 chip inside cards: filter the library to that family.
         this.FindControl<ListBox>("GamesList").AddHandler(Button.ClickEvent, OnCardLinkClick);
@@ -853,7 +861,8 @@ public partial class LibraryView : UserControl
     {
         "Game" => 0,
         "Patch" => 1,
-        _ => 2, // DLC
+        "DLC" => 2,
+        _ => 3, // Image and anything else sorts last, stays visible
     };
 
     /// <summary>
@@ -948,8 +957,12 @@ public partial class LibraryView : UserControl
                         continue;
                     }
                     var bases = grp.Where(g => g.Role == "Game").ToList();
+                    var images = grp.Where(g => g.Role == "Image").ToList();
                     if (bases.Count > 0)
+                    {
                         collapsed.AddRange(bases);
+                        collapsed.AddRange(images); // images stay visible next to their game
+                    }
                     else
                         collapsed.AddRange(grp); // DLC-only family: nothing to collapse to
                 }
@@ -1128,6 +1141,59 @@ public partial class LibraryView : UserControl
             _m.Status = $"Queued {wanted.Count} more — console takes them in order.";
         else
             _ = RunQueueAsync();
+    }
+
+    /// <summary>
+    /// Copy selected image files (.exfat/.ffpkg/.ffpfsc) to /data/homebrew:
+    /// the receiver pulls each file from our file server itself (same
+    /// mechanism as its console Images tab). Covers show on cards whenever
+    /// the image parse yields an icon.
+    /// </summary>
+    private async Task CopyImagesAsync(IEnumerable<GameItem>? only = null)
+    {
+        var picked = (only ?? GamesBox.SelectedItems?.Cast<GameItem>() ?? Enumerable.Empty<GameItem>())
+            .Where(g => g.Role == "Image" && !g.IsFolder)
+            .ToList();
+        if (picked.Count == 0)
+        {
+            _m.Status = "No images in the selection — pick .exfat/.ffpkg/.ffpfsc rows (IMG badge).";
+            return;
+        }
+        try
+        {
+            EnsureServer();
+        }
+        catch (Exception ex)
+        {
+            _m.Status = "File server failed (port 9898 busy — another sender running?): " + Short(ex.Message);
+            return;
+        }
+        int ok = 0;
+        foreach (var g in picked)
+        {
+            string id;
+            lock (_runLock)
+            {
+                if (!_pathIds.TryGetValue(g.Path, out id!))
+                {
+                    id = "lib-" + _sessionTag + "-" + System.Threading.Interlocked.Increment(ref _nextId).ToString();
+                    _pathIds[g.Path] = id;
+                }
+            }
+            _registry[id] = g.Path;
+            string url = _server!.UrlFor(_m.PcIp, id);
+            string remote = "/data/homebrew/" + Path.GetFileName(g.Path);
+            _m.Status = $"Copying {g.Title} to homebrew…";
+            var (started, reply) = await LoopDPI.Core.ConsoleClient.PullAsync(_m.PsIp, url, remote);
+            if (started)
+                ok++;
+            else
+                _m.Status = $"Copy failed for {g.Title}: {Short(reply)}";
+        }
+        if (ok > 0)
+            _m.Status = picked.Count == ok
+                ? $"Copy started for {ok} image(s) — watch the console notifications."
+                : $"Copy started for {ok}/{picked.Count} image(s), {picked.Count - ok} failed.";
     }
 
     private void EnsureServer()

@@ -27,7 +27,8 @@ public sealed class GameItem : ReactiveObject
     public bool IsDlc { get; init; }
     // Family linking: updates/DLCs of one title stay visibly together.
     public string FamilyKey { get; init; } = "";
-    public string Role { get; init; } = "Game"; // Game | Patch | DLC
+    public string Role { get; init; } = "Game"; // Game | Patch | DLC | Image
+    public bool IsImage => Role == "Image";
     public int FamilyCount { get; set; }
     public bool HasFamily { get; set; }
     public string FamilyTip { get; set; } = "";
