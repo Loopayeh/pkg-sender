@@ -26,7 +26,8 @@
 .bdg{font-size:11px;font-weight:bold;border-radius:4px;padding:2px 8px}
 .card button{width:100%;padding:10px;background:#4F8EF7;border:none;border-radius:4px;color:#171717;font-weight:bold;cursor:pointer;font-size:14px}
 .fc{display:inline-block;font-size:12px;color:#4F8EF7;border:1px solid #4F8EF7;border-radius:10px;padding:3px 10px;margin:4px 0 8px;cursor:pointer;background:transparent}
-.fambox{margin:2px 0 8px;display:flex;flex-direction:column;background:#171717;border:1px solid #2A2A2A;border-radius:8px;overflow:hidden;max-height:250px;overflow-y:auto}
+.wrap{position:relative}
+.fambox{position:absolute;top:100%;left:0;right:0;z-index:10;margin:6px 0 0;display:flex;flex-direction:column;background:#171717;border:1px solid #4F8EF7;border-radius:8px;overflow:hidden;max-height:250px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.6)}
 .famgrp{font-size:11px;font-weight:bold;color:#8B93A5;padding:8px 12px 4px;position:sticky;top:0;background:#171717}
 .member{display:flex;gap:10px;align-items:center;padding:10px 12px;text-align:left;border-bottom:1px solid #2A2A2A}
 .member:last-child{border-bottom:none}
@@ -99,7 +100,7 @@ var patches=fam.filter(function(m){return m.role==='Patch';});
 var dlcs=fam.filter(function(m){return m.role!=='Patch';});
 function grp(title,arr){if(!arr.length)return;var h=document.createElement('div');h.className='famgrp';h.textContent=title+' ('+arr.length+')';box.appendChild(h);arr.forEach(function(m){box.appendChild(card(m,1));});}
 grp('Patches',patches);grp('DLC',dlcs);
-var wrap=document.createElement('div');wrap.appendChild(d);wrap.appendChild(box);return wrap;}
+var wrap=document.createElement('div');wrap.className='wrap';wrap.appendChild(d);wrap.appendChild(box);return wrap;}
 return d;}
 function render(){grid.innerHTML='';var list;
 if(kind==='images'){list=all.filter(function(g){return g.format!=='pkg'&&matchP(g)&&matchQ(g);});
