@@ -165,8 +165,7 @@ public partial class LibraryView : UserControl
             _ = LoopDPI.Core.ConsoleClient.PullCancelAsync(_m.PsIp);
             _m.Status = "Stopping…";
         };
-        this.FindControl<CheckBox>("PublishCheck").Checked += (_, _) => SetPublish(true);
-        this.FindControl<CheckBox>("PublishCheck").Unchecked += (_, _) => SetPublish(false);
+        this.FindControl<Button>("BtnShare").Click += (_, _) => ToggleShare();
         this.FindControl<Button>("BtnClearDone").Click += (_, _) =>
         {
             // Finished rows go; stuck rows (sending/queued with no live
@@ -428,6 +427,8 @@ public partial class LibraryView : UserControl
     {
         if (_liveBusy || _detecting)
             return;
+        // Refresh the share button too (Serving… falls back to Shared ✓).
+        Post(UpdateShareLabel);
         var dot = this.FindControl<TextBlock>("TestResultText");
         if (_nets.Count == 0)
         {
@@ -1401,17 +1402,54 @@ public partial class LibraryView : UserControl
         if (_server != null)
             return;
         _server = new RangeFileServer(_registry);
+        _server.FileRequested += _ => { _lastServe = DateTime.UtcNow; Post(UpdateShareLabel); };
         _server.Start();
     }
 
+    private bool _shared;
+    private DateTime _lastServe = DateTime.MinValue;
+
     /// <summary>
-    /// Publish library toggle (console browser catalog): the receiver pulls
+    /// Share button states: idle ghost ("Share to console"), sending
+    /// ("Sharing…", disabled while the server + announce start), live
+    /// ("Shared ✓ — tap to stop", blue), and console activity
+    /// ("Serving to console…", 10s after the last request).
+    /// </summary>
+    private void UpdateShareLabel()
+    {
+        var btn = this.FindControl<Button>("BtnShare");
+        if (btn == null)
+            return;
+        if (!_shared)
+        {
+            btn.IsEnabled = true;
+            btn.Classes.Set("ghost", true);
+            btn.Content = "Share to console";
+            return;
+        }
+        bool serving = (DateTime.UtcNow - _lastServe).TotalSeconds < 10;
+        btn.IsEnabled = true;
+        btn.Classes.Set("ghost", false);
+        btn.Content = serving ? "Serving to console…" : "Shared ✓ — tap to stop";
+    }
+
+    /// <summary>
+    /// Share toggle (console browser catalog): the receiver pulls
     /// GET /catalog + /icon/{id} from this PC and installs via its own page.
     /// </summary>
+    private void ToggleShare() => SetPublish(!_shared);
+
     private void SetPublish(bool on)
     {
         if (on)
         {
+            var btn = this.FindControl<Button>("BtnShare");
+            if (btn != null)
+            {
+                btn.IsEnabled = false;
+                btn.Classes.Set("ghost", true);
+                btn.Content = "Sharing…";
+            }
             try
             {
                 EnsureServer();
@@ -1420,21 +1458,32 @@ public partial class LibraryView : UserControl
             {
                 Post(() =>
                 {
-                    this.FindControl<CheckBox>("PublishCheck").IsChecked = false;
+                    _shared = false;
+                    UpdateShareLabel();
                     _m.Status = "File server failed (port 9898 busy — another sender running?): " + ex.Message;
                 });
                 return;
             }
             _server!.CatalogProvider = BuildCatalog;
             StartPcAnnounce();
-            Post(() => _m.Status = $"Library published: {_server!.CatalogUrlFor(_m.PcIp)} — open it from the console browser (pkg remote installer).");
+            _shared = true;
+            Post(() =>
+            {
+                UpdateShareLabel();
+                _m.Status = $"Library shared: {_server!.CatalogUrlFor(_m.PcIp)} — open it from the console browser (pkg remote installer).";
+            });
         }
         else
         {
             if (_server != null)
                 _server.CatalogProvider = null;
             StopPcAnnounce();
-            Post(() => _m.Status = "Library unpublished.");
+            _shared = false;
+            Post(() =>
+            {
+                UpdateShareLabel();
+                _m.Status = "Library unshared.";
+            });
         }
     }
 
