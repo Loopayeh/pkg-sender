@@ -185,7 +185,7 @@ installer_init(void)
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
 /* bump on every behavior change; the page shows receiver vs page tags */
-#define RECEIVER_BUILD "20260920-06"
+#define RECEIVER_BUILD "20260920-07"
 
 __asm__(
 ".section .rodata\n"
@@ -992,9 +992,6 @@ static const char UI_HTML[] =
 ".frow div:last-child{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}"
 ".frow button{font-size:15px;padding:10px 14px}</style></head><body>"
 
-"<h2>pkg remote installer</h2>"
-"<div id=ver style='font-size:12px;color:#8B93A5;margin-bottom:12px'>page …</div>"
-"form#mf{display:flex;flex-direction:column;gap:12px;width:90%;max-width:520px;margin:0 auto}</style></head><body>"
 "<h2>pkg remote installer</h2>"
 "<div id=ver style='font-size:12px;color:#8B93A5;margin-bottom:12px'>page …</div>"
 "<div id=tabs><button id=tabL class=on>Library</button><button id=tabF>Files</button></div>"
