@@ -41,6 +41,7 @@ public partial class LibraryView : UserControl
     private readonly object _runLock = new();
     private bool _running;
     private volatile bool _stop;
+    private volatile bool _copyStop; // set by ■ Stop: copy poll loop reports "stopped"
     // Zero-config networking: real NIC subnets, beacon-first discovery.
     private List<LoopDPI.Core.LanNetwork> _nets = new();
     private readonly Avalonia.Threading.DispatcherTimer _liveTimer = new();
@@ -158,6 +159,10 @@ public partial class LibraryView : UserControl
             {
                 _stop = true; // worker aborts waits, rows stay visible
             }
+            _copyStop = true;
+            // Copies run on the receiver: tell it to stop the pull worker
+            // (partial file stays, Copy again offers resume).
+            _ = LoopDPI.Core.ConsoleClient.PullCancelAsync(_m.PsIp);
             _m.Status = "Stopping…";
         };
         this.FindControl<CheckBox>("PublishCheck").Checked += (_, _) => SetPublish(true);
@@ -190,9 +195,16 @@ public partial class LibraryView : UserControl
                 box.SelectedItems?.Cast<GameItem>() ?? Enumerable.Empty<GameItem>());
             foreach (var g in _all)
                 g.IsSelected = selected.Contains(g);
-            this.FindControl<Button>("BtnSend").IsEnabled = (box.SelectedItems?.Count ?? 0) > 0;
-            this.FindControl<Button>("BtnCopy").IsEnabled =
-                box.SelectedItems?.Cast<GameItem>().Any(g => g.Role == "Image") == true;
+            // Selection-aware actions: PKGs light up Send, images light up
+            // Copy; the other one goes dim so the right action is obvious.
+            bool hasPkg = selected.Any(g => g.Role != "Image");
+            bool hasImg = selected.Any(g => g.Role == "Image");
+            var btnSend = this.FindControl<Button>("BtnSend");
+            var btnCopy = this.FindControl<Button>("BtnCopy");
+            btnSend.IsEnabled = hasPkg;
+            btnCopy.IsEnabled = hasImg;
+            btnSend.FontWeight = hasPkg ? FontWeight.Bold : FontWeight.Normal;
+            btnCopy.FontWeight = hasImg ? FontWeight.Bold : FontWeight.Normal;
             UpdateGamesLabel();
         };
         // Dense grid: columns follow the panel width so cards always fill
@@ -1221,6 +1233,7 @@ public partial class LibraryView : UserControl
             return;
         }
         int ok = 0;
+        _copyStop = false;
         foreach (var g in picked)
         {
             string id;
@@ -1287,7 +1300,7 @@ public partial class LibraryView : UserControl
             {
                 ok++;
                 // Copy rows live in the queue below with their own progress
-                // bar (State "copying": no pause/resume — those are install-only).
+                // bar (State "copying": per-row ⏸ pauses the receiver pull).
                 var row = new QueueItem { Game = g, State = "copying", Message = resume ? "resuming…" : "copying…", Percent = 0 };
                 _m.Queue.Add(row);
                 UpdateQueueLabel();
@@ -1303,6 +1316,12 @@ public partial class LibraryView : UserControl
                     var (active, name, got, want, isPaused) = await LoopDPI.Core.ConsoleClient.GetPullAsync(_m.PsIp);
                     if (!active)
                     {
+                        if (_copyStop)
+                        {
+                            row.State = "failed";
+                            row.Message = "stopped — partial kept, Copy again to resume";
+                            break;
+                        }
                         // Worker is done (or died fast) — verify by size,
                         // never trust silence: compare remote vs local bytes.
                         var (exists, size) = await LoopDPI.Core.ConsoleClient.StatAsync(_m.PsIp, remote);

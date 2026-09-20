@@ -185,7 +185,7 @@ installer_init(void)
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
 /* bump on every behavior change; the page shows receiver vs page tags */
-#define RECEIVER_BUILD "20260920-10"
+#define RECEIVER_BUILD "20260920-12"
 
 __asm__(
 ".section .rodata\n"
@@ -289,6 +289,10 @@ launcher_install_if_needed(void)
 	}
 }
 #endif /* TEST_ONLY */
+#ifdef TEST_ONLY
+/* TEST_ONLY has no launcher block above, but still reports a build tag */
+#define RECEIVER_BUILD "20260920-12-TEST"
+#endif
 
 /* install runs on a detached worker so a slow/hanging SCE call can
  * never wedge the single-threaded HTTP loop. */
@@ -1077,6 +1081,7 @@ static const char UI_HTML[] =
 "msg.textContent='Copy started — watch the console notifications.';}"
 "catch(ex){msg.textContent='Error: '+ex;}}"
 "function imgIcon(f){if(f==='exfat')return '💽';if(f==='ffpkg'||f==='ffpfsc')return '🗜';return '📦';}"
+"function fmtColor(f){if(f==='exfat')return '#34B595';if(f==='ffpfsc')return '#CE9C40';if(f==='ffpkg')return '#A27AD8';return '#6498F0';}"
 "function card(g,sub){var d=document.createElement('div');d.className=sub?'member':'card';"
 "var im=(!sub&&g.hasIcon)?'<img src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'';"
 "var meta=esc(g.titleId||'');if(g.version)meta+=' v'+esc(g.version);"
@@ -1088,7 +1093,9 @@ static const char UI_HTML[] =
 "b.onclick=function(ev){ev.stopPropagation();install(g.id,g.title);};"
 "w.appendChild(b);d.appendChild(w);return d;}"
 "if(kind==='images'){"
-"d.innerHTML='<div class=big>'+imgIcon(g.format)+'</div><div class=t>'+esc(g.title)+'</div><div class=m>'+esc(g.format)+' &middot; '+esc(g.sizeText||'')+'</div>';"
+"var cov=g.hasIcon?'<img src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'';"
+"var fb='<span style=\"display:inline-block;background:'+fmtColor(g.format)+';color:#fff;font-size:12px;font-weight:bold;border-radius:4px;padding:2px 8px\">'+esc((g.format||'img').toUpperCase())+'</span>';"
+"d.innerHTML=cov+'<div class=big>'+imgIcon(g.format)+'</div><div class=t>'+esc(g.title)+'</div><div class=m>'+fb+' &middot; '+esc(g.sizeText||'')+'</div>';"
 "var cb=document.createElement('button');cb.textContent='Copy to homebrew';"
 "cb.onclick=function(ev){ev.stopPropagation();copyImg(g.id,g.file||g.title,g.size||0);};d.appendChild(cb);return d;}"
 "var fam=all.filter(function(m){return m.format==='pkg'&&!isBase(m)&&m.familyKey===g.familyKey;});"
@@ -1243,6 +1250,7 @@ typedef struct pull_job {
 /* pull progress, visible in GET /api/status while a copy runs */
 static volatile int g_pull_active = 0;
 static volatile int g_pull_paused = 0;
+static volatile int g_pull_cancel = 0;
 static volatile long long g_pull_got = 0;
 static volatile long long g_pull_want = -1;
 static char g_pull_name[128];
@@ -1394,12 +1402,14 @@ pull_seg_worker(void *arg)
 		return NULL;
 	}
 	left = sg->len;
-	while (left > 0) {
+	while (left > 0 && !g_pull_cancel) {
 		size_t want = (size_t)(left < PULL_CHUNK ? left : PULL_CHUNK);
 		size_t got = 0;
 
-		while (g_pull_paused)
+		while (g_pull_paused && !g_pull_cancel)
 			sleep(1);
+		if (g_pull_cancel)
+			break;
 		n = recv(s, hb, want, 0);
 		if (n < 0) {
 			if (errno == EINTR)
@@ -1614,8 +1624,10 @@ pull_download(const char *url, const char *local, int resume)
 			return -1;
 		}
 		for (;;) {
-			while (g_pull_paused)
+			while (g_pull_paused && !g_pull_cancel)
 				sleep(1);
+			if (g_pull_cancel)
+				break;
 			n = recv(s, hb, PULL_CHUNK, 0);
 			if (n < 0) {
 				if (errno == EINTR)
@@ -1661,11 +1673,14 @@ pull_worker(void *arg)
 				*q = '_';
 	}
 	g_pull_active = 1;
+	g_pull_cancel = 0; /* fresh job clears any earlier cancel */
 	__sync_fetch_and_add(&g_active_installs, 1);
- 	rc = pull_download(job->url, job->local, job->resume);
+  	rc = pull_download(job->url, job->local, job->resume);
 	__sync_fetch_and_sub(&g_active_installs, 1);
 	g_pull_active = 0;
-	if (rc == 0)
+	if (g_pull_cancel)
+		snprintf(toast, sizeof(toast), "Loopayeh: copy stopped %s", base);
+	else if (rc == 0)
 		snprintf(toast, sizeof(toast), "Loopayeh: %s %s",
 		    job->resume ? "resumed" : "copied", base);
 	else if (rc == 1)
@@ -1830,6 +1845,12 @@ handle_client(int fd)
 		g_pull_paused = paused ? 1 : 0;
 		send_json(fd, g_pull_paused ? "{\"ok\":true,\"paused\":true}"
 		    : "{\"ok\":true,\"paused\":false}");
+	} else if (!strcmp(method, "POST") &&
+	           !strncmp(path, "/api/pull/cancel", 16)) {
+		/* stop the running pull; the partial file stays for resume */
+		g_pull_cancel = 1;
+		g_pull_paused = 0;
+		send_json(fd, "{\"ok\":true,\"cancelled\":true}");
 	} else if (!strcmp(method, "GET") &&
 	           !strncmp(path, "/api/version", 12)) {
 		send_json(fd, "{\"build\":\"" RECEIVER_BUILD "\"}");

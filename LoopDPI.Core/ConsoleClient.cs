@@ -122,6 +122,22 @@ public static class ConsoleClient
         return (active, name, got, want, paused);
     }
 
+    /// <summary>Stop the receiver's running pull copy (partial stays for resume).</summary>
+    public static async Task<bool> PullCancelAsync(string psIp)
+    {
+        try
+        {
+            using var c = NewClient(10);
+            using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var resp = await c.PostAsync($"http://{psIp}:12800/api/pull/cancel", content);
+            string body = await resp.Content.ReadAsStringAsync();
+            return body.Contains("\"ok\"");
+        }
+        catch
+        {
+            return false;
+        }
+    }
     /// <summary>Pause/unpause the receiver's running pull copy.</summary>
     public static async Task<bool> PullPauseAsync(string psIp, bool paused)
     {
