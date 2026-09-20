@@ -80,6 +80,34 @@ Works with a jailbroken PS4 running a compatible package receiver (listening on 
 - Self-updating: silent check at startup, footer button lights up on new release (off switch in About for offline PCs)
 - Guide window with setup + troubleshooting, first-run About
 
+## Receiver API
+
+The receiver listens on `http://<console-ip>:12800`. File paths are jailed
+under `/data/homebrew`. This API is not stable and may change between versions.
+
+| Method | Path | Input | Reply |
+| ------ | ---- | ----- | ----- |
+| GET | `/api` | — | probe (online check, no action) |
+| GET | `/api/status` | — | `{"busy":bool,"active":N}` |
+| POST | `/api/install` | `{"packages":["<url>"],"name":"...","icon_url":"..."}` (`name`/`icon_url` optional) | `{"status":"success"}` or `{"status":"fail",...}` |
+| GET | `/install?url=` | PKG URL as query arg | starts install, plain-text reply |
+| GET | `/api/files/stat?path=` | remote path | `{"exists":bool,"size":N}` |
+| POST | `/api/files/mkdir` | `{"path":"..."}` | `{"ok":true}` or `error:...` |
+| POST | `/api/files/write?path=&offset=` | raw bytes, offset in bytes | `{"ok":true}` or `error:...` |
+| POST | `/api/files/done` | `{"path":"...","size":N}` (verifies size) | `{"ok":true,"size":N}` or `error:size mismatch` |
+
+Discovery: the receiver broadcasts `PKGSENDER v1` to UDP `255.255.255.255:12801`
+every 3 seconds.
+
+Example (check, upload one chunk at offset 0, finalize):
+
+```sh
+curl "http://<console-ip>:12800/api/files/stat?path=mygame.pkg"
+curl -X POST --data-binary @chunk0.bin "http://<console-ip>:12800/api/files/write?path=mygame.pkg&offset=0"
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"path":"mygame.pkg","size":123456}' http://<console-ip>:12800/api/files/done
+```
+
 ## Screenshots
 
 ![PKG Sender main view](docs/screenshot-main.png)
