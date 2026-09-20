@@ -1046,7 +1046,7 @@ static volatile long long g_pull_want = -1;
 static char g_pull_name[128];
 
 /* 0 = ok, 1 = skipped (same size present), -1 = error */
-#define PULL_SEGS 16
+#define PULL_SEGS 32
 #define PULL_CHUNK (1024 * 1024)
 
 typedef struct pull_seg {
