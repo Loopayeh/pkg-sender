@@ -153,6 +153,24 @@ public static class ConsoleClient
             return -1;
         }
     }
+    /// <summary>
+    /// Remote file size via GET /api/files/stat?path= : (exists, size).
+    /// Used to verify a pull copy really landed byte-complete.
+    /// </summary>
+    public static async Task<(bool Exists, long Size)> StatAsync(string psIp, string remotePath)
+    {
+        try
+        {
+            using var c = NewClient(10);
+            string body = await c.GetStringAsync(
+                $"http://{psIp}:12800/api/files/stat?path={Uri.EscapeDataString(remotePath)}");
+            return (body.Contains("\"exists\":true"), LongField(body, "size"));
+        }
+        catch
+        {
+            return (false, -1);
+        }
+    }
     private static string JsonEscape(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");
 }

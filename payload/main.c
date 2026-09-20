@@ -1284,11 +1284,18 @@ pull_download(const char *url, const char *local)
 	g_pull_want = want;
 	g_pull_got = 0;
 	if (want >= 2 * 1024 * 1024) {
-		/* ── fast path: PULL_SEGS parallel Range streams ── */
-		pull_seg_t segs[PULL_SEGS];
-		pthread_t tids[PULL_SEGS];
+		/* ── fast path: PULL_SEGS parallel Range streams ──
+		 * heap, not stack: worker threads have small stacks. */
+		pull_seg_t *segs = malloc(sizeof(*segs) * PULL_SEGS);
+		pthread_t *tids = malloc(sizeof(*tids) * PULL_SEGS);
 		long long part = want / PULL_SEGS;
-		int i, spawned = 0;
+		int i, spawned = 0, rc = -1;
+
+		if (!segs || !tids) {
+			free(segs);
+			free(tids);
+			return -1;
+		}
 
 		out = open(local, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 		if (out < 0)
@@ -1314,13 +1321,20 @@ pull_download(const char *url, const char *local)
 		if (spawned != PULL_SEGS) {
 			for (i = 0; i < spawned; i++)
 				pthread_join(tids[i], NULL);
+			free(segs);
+			free(tids);
 			return -1;
 		}
 		for (i = 0; i < PULL_SEGS; i++)
 			pthread_join(tids[i], NULL);
+		rc = 0;
 		for (i = 0; i < PULL_SEGS; i++)
 			if (!segs[i].ok)
-				return -1;
+				rc = -1;
+		free(segs);
+		free(tids);
+		if (rc != 0)
+			return -1;
 		if (stat(local, &st) != 0 || (long long)st.st_size != want)
 			return -1;
 		return 0;

@@ -1243,9 +1243,22 @@ public partial class LibraryView : UserControl
                     var (active, name, got, want) = await LoopDPI.Core.ConsoleClient.GetPullAsync(_m.PsIp);
                     if (!active)
                     {
-                        row.Percent = 100;
-                        row.State = "sent";
-                        row.Message = want > 0 ? Program.FormatSize(want) + " copied" : "copied";
+                        // Worker is done (or died fast) — verify by size,
+                        // never trust silence: compare remote vs local bytes.
+                        var (exists, size) = await LoopDPI.Core.ConsoleClient.StatAsync(_m.PsIp, remote);
+                        if (exists && size == g.SizeBytes && g.SizeBytes > 0)
+                        {
+                            row.Percent = 100;
+                            row.State = "sent";
+                            row.Message = Program.FormatSize(size) + " verified ✓";
+                        }
+                        else
+                        {
+                            row.State = "failed";
+                            row.Message = exists
+                                ? $"size mismatch (console {Program.FormatSize(size)}) — retry"
+                                : "not on console — check console notification, retry";
+                        }
                         break;
                     }
                     DateTime now = DateTime.UtcNow;
