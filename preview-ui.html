@@ -1,0 +1,464 @@
+<!DOCTYPE html><html><head><meta charset=utf-8>
+<meta name=viewport content='width=device-width,initial-scale=1'>
+<title>pkg remote installer</title>
+<style>body{background:#171717;color:#F1F3F8;font-family:'Segoe UI',sans-serif;margin:0;padding:24px;font-size:19px}
+.wrap{max-width:1100px;margin:0 auto}
+.hd{display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap}
+.hd h2{margin:0;font-size:26px;flex:1}
+.hd #ver{font-size:12px;color:#8B93A5}
+.hd #pcstat{font-size:12px;color:#6FCF7B;background:#202020;border:1px solid #2A2A2A;border-radius:12px;padding:6px 12px;white-space:nowrap;cursor:pointer}
+.hd #space{font-size:12px;color:#8B93A5;background:#202020;border-radius:12px;padding:6px 12px;white-space:nowrap}
+#qbar{height:8px;background:#2A2A2A;border-radius:4px;margin-top:8px;display:none;overflow:hidden}
+#copctl{margin-top:10px;display:flex;gap:8px}
+#copctl button{flex:1;font-size:17px;padding:13px}
+#qfill{height:100%;width:0;background:#4F8EF7;border-radius:4px}
+button:focus-visible,input:focus-visible,.card:focus{outline:3px solid #4F8EF7;outline-offset:2px}
+.card{cursor:pointer}
+#pcrow input{padding:12px;font-size:16px}
+#pcrow button.go,#pcrow button.gh{padding:12px 16px;font-size:16px}
+.hd #pcstat{font-size:12px;color:#6FCF7B;background:#202020;border-radius:4px;padding:4px 10px;white-space:nowrap}
+h2{color:#F1F3F8;margin:0 0 14px;font-size:30px}
+#tabs{display:flex;gap:8px;margin-bottom:14px}
+#tabs button{flex:1;padding:18px;background:#2A2A2A;border:none;border-radius:6px;color:#F1F3F8;font-size:21px;font-weight:bold;cursor:pointer}
+#tabs button.on{background:#4F8EF7;color:#171717}
+#pcrow{display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap}
+#pcstat{font-size:15px;color:#8B93A5;white-space:nowrap}
+#tools{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+#tools input{flex:1}
+#chips,#kind{display:flex;gap:6px}
+#chips button,#kind button{padding:16px 20px;background:#2A2A2A;border:none;border-radius:6px;color:#F1F3F8;font-size:19px;cursor:pointer}
+#chips button.on,#kind button.on{background:#4F8EF7;color:#171717}
+#kind{margin-bottom:12px}
+input{flex:1;padding:16px;border:1px solid #2A2A2A;border-radius:6px;background:#2A2A2A;color:#F1F3F8;font-size:19px}
+button.go{padding:16px 22px;background:#4F8EF7;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer}
+button.gh{padding:14px 20px;background:#404040;border:none;border-radius:6px;color:#F1F3F8;font-size:19px;cursor:pointer}
+button.danger{padding:14px 20px;background:#E17B7B;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer}
+#grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}
+@media(max-width:1100px){#grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}}
+.card{background:#202020;border-radius:10px;padding:14px;text-align:center;transition:transform .12s,box-shadow .12s;display:flex;flex-direction:column;position:relative}
+.card:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.5)}
+.card img{width:100%;height:auto;object-fit:contain;background:#202020;display:block}
+.card img.cov5{border-radius:14px}
+.card img.cov4{border-radius:0}
+.cov{width:100%;aspect-ratio:1/1;min-height:170px;background:#202020;display:flex;align-items:center;justify-content:center}
+.cov.cov5{border-radius:14px}
+.cov.cov4{border-radius:0}
+.cov span{font-size:56px;opacity:.35}
+.badges{position:absolute;top:30px;left:24px;display:flex;gap:6px}
+.bdg{font-size:11px;font-weight:bold;border-radius:4px;padding:2px 8px}
+.card .t{font-size:18px;margin:10px 0 4px;min-height:44px}
+.card .m{font-size:15px;color:#8B93A5;margin-bottom:10px}
+.card button{width:100%;padding:15px;background:#4F8EF7;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer;margin-top:auto}
+.card .fc{margin-bottom:10px}
+.card button.sec{margin-top:8px;background:#2A2A2A;color:#F1F3F8}
+.card.sel{outline:2px solid #4F8EF7}
+.fampanel{grid-column:1/-1;background:#202020;border-radius:8px;padding:10px}
+.famgrp{font-size:12px;font-weight:bold;color:#8B93A5;padding:8px 12px 4px;text-align:left}
+.movl{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.88);z-index:9999}
+.mbox{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#202020;border:1px solid #4F8EF7;border-radius:12px;width:560px;max-width:calc(100% - 40px);max-height:calc(100% - 40px);overflow-y:auto;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.7);z-index:10000}
+.mbox h3{margin:0 0 4px;font-size:22px;padding-right:52px}
+.mx{position:absolute;top:12px;right:12px;width:44px;height:44px;font-size:24px;line-height:1;background:#2A2A2A;border:none;border-radius:8px;color:#F1F3F8;cursor:pointer}
+.mbox .mm{font-size:14px;color:#8B93A5;margin-bottom:12px}
+.mbox .mrow{display:flex;gap:8px;margin-bottom:12px}
+.mbox .mrow button{flex:1}
+.mbox button.go,.mbox button.gh{width:100%;margin-bottom:8px}
+.mclose{width:100%;padding:12px;background:#2A2A2A;border:none;border-radius:6px;color:#F1F3F8;font-size:16px;cursor:pointer;margin-top:4px}
+.big{font-size:64px}
+.fc{display:inline-block;font-size:15px;color:#4F8EF7;border:1px solid #4F8EF7;border-radius:12px;padding:4px 12px;margin-top:6px}
+.fambox{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.member{display:flex;gap:10px;align-items:center;background:#171717;border-radius:10px;padding:14px;text-align:left}
+.member .t{font-size:17px}.member .m{font-size:15px;color:#8B93A5}
+.member div:first-child{flex:1}
+.rb{font-size:13px;color:#171717;background:#4F8EF7;border-radius:4px;padding:3px 8px;margin-right:8px}
+.member button{padding:13px 20px;background:#4F8EF7;border:none;border-radius:6px;color:#171717;font-size:18px;font-weight:bold;cursor:pointer}
+#msg{margin-top:16px;font-size:19px;color:#8B93A5;min-height:30px}
+#msg.ok{color:#34B595}#msg.err{color:#E17B7B}
+#fmsg{margin-top:14px;font-size:15px;color:#8B93A5;min-height:24px}
+#crumb,#mkrow,#usbrow{display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap}
+#fpath{font-size:15px;color:#8B93A5}
+.frow{display:flex;gap:10px;align-items:center;background:#202020;border-radius:8px;padding:14px;margin-bottom:10px}
+.frow div:first-child{flex:1;font-size:17px}
+.frow .m{font-size:13px;color:#8B93A5}
+.frow div:last-child{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.frow button{font-size:15px;padding:10px 14px}</style></head><body><div class=wrap>
+<div class=hd><h2>pkg remote installer</h2><span id=ver>page …</span><button id=pcstat>PC: ...</button><span id=space style='display:none'></span></div>
+<div id=tabs style='display:none'><button id=tabL class=on>Library</button><button id=tabF style='display:none'>Files</button></div>
+<div id=lib>
+<div id=pcrow style='display:none'>
+<input id=pc placeholder='PC address'><button class=go id=save>Save</button><button class=gh id=reload>Refresh</button></div>
+<div id=tools><input id=q placeholder='Search title or ID...'>
+<div id=chips><button data-p=all class=on>All</button><button data-p=PS5>PS5</button><button data-p=PS4>PS4</button></div></div>
+<div id=kind><button data-k=games class=on>Games</button><button data-k=images>Images</button></div>
+<div id=grid></div><div id=msg></div><div id=qbar><div id=qfill></div></div><div id=copctl style='display:none'><button class=gh id=copPause>Pause</button><button class=danger id=copCancel>Cancel copy</button></div></div>
+<div id=files style='display:none'>
+<div id=usbrow><button class=gh data-u='/data'>Data</button>
+<button class=gh data-u='/mnt/usb0'>USB0</button>
+<button class=gh data-u='/mnt/usb1'>USB1</button>
+<button class=gh data-u='/mnt/usb2'>USB2</button>
+<button class=gh data-u='/mnt/usb3'>USB3</button></div>
+<div id=crumb><button class=gh id=up>Up</button><span id=fpath>/data</span></div>
+<div id=mkrow><input id=mkname placeholder='New folder name'><button class=go id=mkbtn>New folder</button></div>
+<div id=flist></div><div id=fmsg></div></div>
+</div><div id=movl style='display:none'><div class=mbox id=mbox></div></div><script>
+window.__preview = true;
+const __catalog = [
+  {"id":"CUSA12345-game.pkg","title":"Sample Game One","titleId":"CUSA12345","version":"1.00","sizeText":"45.2 GB","platform":"PS5","format":"pkg","role":"Game","familyKey":"FAM1","hasIcon":true},
+  {"id":"CUSA12345-patch.pkg","title":"Sample Game One Patch","titleId":"CUSA12345","version":"1.02","sizeText":"8.1 GB","platform":"PS5","format":"pkg","role":"Patch","familyKey":"FAM1","hasIcon":false},
+  {"id":"CUSA12345-dlc1.pkg","title":"Extra Story DLC","titleId":"CUSA12345","version":"1.00","sizeText":"3.4 GB","platform":"PS5","format":"pkg","role":"DLC","familyKey":"FAM1","hasIcon":false},
+  {"id":"CUSA12345-dlc2.pkg","title":"Weapon Skin Pack","titleId":"CUSA12345","version":"1.00","sizeText":"1.2 GB","platform":"PS5","format":"pkg","role":"DLC","familyKey":"FAM1","hasIcon":false},
+  {"id":"CUSA12345-dlc3.pkg","title":"Soundtrack Bundle","titleId":"CUSA12345","version":"1.00","sizeText":"900 MB","platform":"PS5","format":"pkg","role":"DLC","familyKey":"FAM1","hasIcon":false},
+  {"id":"CUSA67890-game.pkg","title":"Sample Game Two","titleId":"CUSA67890","version":"2.10","sizeText":"60.0 GB","platform":"PS4","format":"pkg","role":"Game","familyKey":"FAM2","hasIcon":true},
+  {"id":"CUSA67890-patch.pkg","title":"Sample Game Two Patch","titleId":"CUSA67890","version":"2.11","sizeText":"4.7 GB","platform":"PS4","format":"pkg","role":"Patch","familyKey":"FAM2","hasIcon":false},
+  {"id":"CUSA11111-game.pkg","title":"A Very Long Game Title That Should Wrap Over Two Lines In The Card","titleId":"CUSA11111","version":"1.00","sizeText":"12.8 GB","platform":"PS5","format":"pkg","role":"Game","familyKey":"FAM3","hasIcon":false},
+  {"id":"CUSA22222-game.pkg","title":"No Version Game","titleId":"CUSA22222","sizeText":"30.0 GB","platform":"PS5","format":"pkg","role":"Game","familyKey":"FAM4","hasIcon":false},
+  {"id":"CUSA33333-game.pkg","title":"Icon Game (broken cover)","titleId":"CUSA33333","version":"3.00","sizeText":"22.5 GB","platform":"PS5","format":"pkg","role":"Game","familyKey":"FAM5","hasIcon":true},
+  {"id":"FILE-lone1","title":"Standalone Homebrew Tool v1","titleId":"","version":"","sizeText":"150 MB","platform":"PS5","format":"pkg","role":"Tool","familyKey":"FILE:lone1","hasIcon":false},
+  {"id":"FILE-lone2","title":"Another Loose Package","titleId":"","version":"","sizeText":"2.0 GB","platform":"PS4","format":"pkg","role":"App","familyKey":"FILE:lone2","hasIcon":false},
+  {"id":"img1","title":"Linux Image","sizeText":"2.2 GB","size":2362232013,"platform":"PS5","format":"exfat","file":"ps5-linux.exfat","hasIcon":false},
+  {"id":"img2","title":"Firmware Pack","sizeText":"1.1 GB","size":1181116006,"platform":"PS5","format":"ffpkg","file":"fw.ffpkg","hasIcon":false},
+  {"id":"img3","title":"Recovery Image","sizeText":"3.0 GB","size":3221225472,"platform":"PS5","format":"ffpfsc","file":"recovery.ffpfsc","hasIcon":false},
+  {"id":"img4","title":"Old Big Dump With A Long File Name","sizeText":"90.5 GB","size":97171631104,"platform":"PS5","format":"exfat","file":"very-long-dump-name-90gb.exfat","hasIcon":false},
+  {"id":"PPSA08385-game.pkg","title":"God of War Ragnarok","titleId":"PPSA08385","version":"06.00","sizeText":"84.2 GB","platform":"PS5","format":"pkg","role":"Game","familyKey":"FAM6","hasIcon":true},
+  {"id":"PPSA08385-patch.pkg","title":"God of War Ragnarok Patch","titleId":"PPSA08385","version":"06.02","sizeText":"5.4 GB","platform":"PS5","format":"pkg","role":"Patch","familyKey":"FAM6","hasIcon":false},
+  {"id":"PPSA08385-dlc1.pkg","title":"Ragnarok: Valhalla DLC","titleId":"PPSA08385","version":"01.00","sizeText":"8.7 GB","platform":"PS5","format":"pkg","role":"DLC","familyKey":"FAM6","hasIcon":false},
+  {"id":"CUSA00900-game.pkg","title":"Bloodborne","titleId":"CUSA00900","version":"1.09","sizeText":"27.9 GB","platform":"PS4","format":"pkg","role":"Game","familyKey":"FAM7","hasIcon":true},
+  {"id":"CUSA00900-dlc1.pkg","title":"Bloodborne: The Old Hunters","titleId":"CUSA00900","version":"1.00","sizeText":"6.3 GB","platform":"PS4","format":"pkg","role":"DLC","familyKey":"FAM7","hasIcon":false},
+  {"id":"PPSA02117-game.pkg","title":"Stellar Blade","titleId":"PPSA02117","version":"1.04","sizeText":"31.5 GB","platform":"PS5","format":"pkg","role":"Game","familyKey":"FAM8","hasIcon":true},
+  {"id":"PPSA03012-game.pkg","title":"Train Sim World","titleId":"PPSA03012","version":"1.00","sizeText":"22.0 GB","platform":"PS5","format":"pkg","role":"Game","familyKey":"FAM9","hasIcon":false},
+  {"id":"PPSA03012-patch.pkg","title":"Train Sim World Patch","titleId":"PPSA03012","version":"1.02","sizeText":"1.4 GB","platform":"PS5","format":"pkg","role":"Patch","familyKey":"FAM9","hasIcon":false},
+  {"id":"PPSA03012-dlc1.pkg","title":"Route: London-Brighton","titleId":"PPSA03012","version":"1.00","sizeText":"3.2 GB","platform":"PS5","format":"pkg","role":"DLC","familyKey":"FAM9","hasIcon":false},
+  {"id":"PPSA03012-dlc2.pkg","title":"Route: Alpine Pass","titleId":"PPSA03012","version":"1.00","sizeText":"2.8 GB","platform":"PS5","format":"pkg","role":"DLC","familyKey":"FAM9","hasIcon":false},
+  {"id":"PPSA03012-dlc3.pkg","title":"Loco Pack Vol.1","titleId":"PPSA03012","version":"1.00","sizeText":"1.1 GB","platform":"PS5","format":"pkg","role":"DLC","familyKey":"FAM9","hasIcon":false},
+  {"id":"FILE-tool1","title":"Homebrew Store","titleId":"","version":"2.3","sizeText":"45 MB","platform":"PS5","format":"pkg","role":"Tool","familyKey":"FILE:tool1","hasIcon":false},
+  {"id":"FILE-tool2","title":"FTP Server","titleId":"","version":"","sizeText":"12 MB","platform":"PS4","format":"pkg","role":"App","familyKey":"FILE:tool2","hasIcon":false},
+  {"id":"img5","title":"Elden Ring Dump","sizeText":"196.0 GB","size":210453397504,"platform":"PS5","format":"exfat","file":"ELDEN RING - PPSA04610.exfat","hasIcon":true},
+  {"id":"img6","title":"NFS Unbound Dump","sizeText":"34.2 GB","size":36721177344,"platform":"PS5","format":"ffpkg","file":"NFS Unbound - PPSA01716.ffpkg","hasIcon":false}
+];
+__catalog.forEach(function(g){if(!g.size&&g.sizeText){var m=/([\d.]+)\s*(GB|MB|KB)/.exec(g.sizeText);if(m){var v=parseFloat(m[1]);g.size=Math.floor(v*(m[2]==='GB'?1073741824:(m[2]==='MB'?1048576:1024)));}}});
+const __realFetch = window.fetch.bind(window);
+window.fetch = function(url, opts) {
+  url = String(url);
+  if (url.indexOf('/api/version') >= 0)
+    return Promise.resolve(new Response(JSON.stringify({build:'20260920-17'})));
+  if (url.indexOf('/api/pc') >= 0)
+    return Promise.resolve(new Response(JSON.stringify({pc:'192.168.1.50', age:2})));
+  if (url.indexOf(':9898/catalog') >= 0)
+    return Promise.resolve(new Response(JSON.stringify(__catalog)));
+  if (url.indexOf('/install?url=') >= 0)
+    return Promise.resolve(new Response('ok: install queued for preview-pkg'));
+  if (url.indexOf('/api/space') >= 0)
+    return Promise.resolve(new Response(JSON.stringify({free:214748364800,total:858993459200})));
+  if (url.indexOf('/icon/') >= 0) {
+    var iid = decodeURIComponent(url.split('/icon/')[1] || '');
+    var it = null;
+    for (var k = 0; k < __catalog.length; k++) if (__catalog[k].id === iid) it = __catalog[k];
+    var wide = !it || it.platform !== 'PS4';
+    var W = 512, H = 512;
+    var bg = wide ? '#0070D1' : '#4F8EF7';
+    var tn = it ? it.title : iid;
+    var svg = "<svg xmlns='http://www.w3.org/2000/svg' width='"+W+"' height='"+H+"'>"
+      + "<rect width='100%' height='100%' fill='"+bg+"'/>"
+      + "<text x='50%' y='50%' fill='white' font-size='36' text-anchor='middle' font-family='sans-serif'>"+tn.replace(/&/g,'&amp;').replace(/</g,'&lt;')+"</text></svg>";
+    return Promise.resolve(new Response(svg, {headers:{'Content-Type':'image/svg+xml'}}));
+  }
+  if (url.indexOf('/api/status') >= 0)
+    return Promise.resolve(new Response(JSON.stringify({busy:false, active:0})));
+  return __realFetch(url, opts);
+};
+</script>
+<script>(function(){var PAGE_BUILD=20260920-17;
+var verd=document.getElementById('ver');
+verd.textContent='page '+PAGE_BUILD+' • receiver …';
+fetch('/api/version').then(function(r){return r.text();}).then(function(t){
+if(t.charAt(0)!=='{'){verd.textContent='page '+PAGE_BUILD+' • receiver: unknown (old payload? resend ELF)';return;}
+var j=JSON.parse(t);
+verd.textContent='page '+PAGE_BUILD+' • receiver '+j.build+((j.build===PAGE_BUILD)?'':' • MISMATCH — resend the newest ELF');
+}).catch(function(){verd.textContent='page '+PAGE_BUILD+' • receiver: unreachable';});
+var pcEl=document.getElementById('pc');
+var pcstat=document.getElementById('pcstat');
+var grid=document.getElementById('grid');var msg=document.getElementById('msg');
+var qEl=document.getElementById('q');
+var all=[],openFam=null,plat='all',kind='games';
+var freeBytes=-1;
+async function loadSpace(){var sp=document.getElementById('space');
+try{var r=await fetch('/api/space');var j=await r.json();
+if(j.free>=0){freeBytes=j.free;sp.textContent='Free '+fmtSize(j.free)+' / '+fmtSize(j.total);sp.style.display='';}}
+catch(ex){sp.style.display='none';}}
+function qTotal(q){var t=0;for(var i=0;i<q.length;i++)t+=(q[i].size||0);return t;}
+function setBar(done,total){var b=document.getElementById('qbar'),f=document.getElementById('qfill');
+if(total>0){b.style.display='';f.style.width=Math.min(100,Math.floor(done*100/total))+'%';}else b.style.display='none';}
+var fpath='/data';
+pcEl.value=localStorage.getItem('pri_pc')||'';
+function show(t){document.getElementById('lib').style.display=t?'':'none';
+document.getElementById('files').style.display=t?'none':'';
+document.getElementById('tabL').className=t?'on':'';
+document.getElementById('tabF').className=t?'':'on';
+if(!t)fsLoad();}
+document.getElementById('tabL').onclick=function(){show(1);};
+document.getElementById('copPause').onclick=function(){copPauseToggle();};
+document.getElementById('copCancel').onclick=function(){copCancel();};
+document.getElementById('tabF').onclick=function(){show(0);};
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+function fmtSize(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';
+if(n<1073741824)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(2)+' GB';}
+function fmtSpd(b){if(b<1024)return b.toFixed(0)+' B/s';if(b<1048576)return (b/1024).toFixed(0)+' KB/s';
+return (b/1048576).toFixed(1)+' MB/s';}
+function rank(r){return r==='Patch'?1:(r==='DLC'?2:0);}
+function lone(g){return (g.familyKey||'').indexOf('FILE:')===0;}
+function isBase(g){return g.role==='Game'||lone(g);}
+function matchQ(g){var q=qEl.value.trim().toLowerCase();if(!q)return 1;
+return (g.title+' '+g.titleId).toLowerCase().indexOf(q)>=0;}
+function matchP(g){if(plat==='all')return 1;return g.platform===plat;}
+async function install(id,name){msg.className='';msg.textContent='Installing '+name+'...';
+try{var u='http://'+pcEl.value+':9898/pkg/'+encodeURIComponent(id);
+var r=await fetch('/install?url='+encodeURIComponent(u));
+var t=await r.text();
+if(t.indexOf('ok:')===0){msg.className='ok';msg.textContent=t+' — watch the console notifications.';pollBusy(name).then(function(){loadSpace();});}
+else{msg.className='err';msg.textContent=t;}}catch(ex){msg.className='err';msg.textContent='Error: '+ex;}}
+async function pollBusy(name){
+for(var i=0;i<300;i++){await new Promise(function(rs){setTimeout(rs,2000);});
+try{var s=await fetch('/api/status');var j=await s.json();
+if(!j.busy){msg.className='ok';msg.textContent='Done: '+name+' — check the console.';return true;}
+msg.className='';msg.textContent='Installing '+name+'... (active: '+j.active+')';}
+catch(ex){return false;}}
+return true;}
+async function waitBusy(){
+for(var i=0;i<30;i++){await new Promise(function(rs){setTimeout(rs,1000);});
+try{var s=await fetch('/api/status');var j=await s.json();if(j.busy)return true;}
+catch(ex){return false;}}
+return true;}
+async function waitIdle(){
+if(!(await waitBusy()))return false;
+for(var i=0;i<600;i++){await new Promise(function(rs){setTimeout(rs,2000);});
+try{var s=await fetch('/api/status');var j=await s.json();if(!j.busy)return true;}
+catch(ex){return false;}}
+return true;}
+async function installOne(g){
+try{var u='http://'+pcEl.value+':9898/pkg/'+encodeURIComponent(g.id);
+var r=await fetch('/install?url='+encodeURIComponent(u));
+var t=await r.text();
+if(t.indexOf('ok:')!==0){msg.className='err';msg.textContent=t;return false;}
+return true;}catch(ex){msg.className='err';msg.textContent='Error: '+ex;return false;}}
+async function installAll(base){
+var q=[base].concat(famOf(base));
+var total=qTotal(q);
+var c='Install '+q.length+' packages? '+q.map(function(m,i){return (i+1)+'. '+m.title+' ('+m.role+')';}).join(', ');
+if(total>0)c+='\nTotal size: '+fmtSize(total);
+if(freeBytes>=0&&total>0)c+=' — console free: '+fmtSize(freeBytes)+(total>freeBytes?' — NOT ENOUGH SPACE!':'');
+if(!confirm(c))return;
+var done=0;setBar(0,total);
+for(var i=0;i<q.length;i++){
+msg.className='';msg.textContent='Queue '+(i+1)+'/'+q.length+': '+q[i].title+'...'+(total>0?' ('+fmtSize(done)+' of '+fmtSize(total)+' done)':'');
+if(!(await installOne(q[i]))){setBar(done,total);return;}
+if(!(await waitIdle())){setBar(done,total);return;}
+done+=(q[i].size||0);setBar(done,total);}
+document.getElementById('qbar').style.display='none';
+msg.className='ok';msg.textContent='Done: '+base.title+' + '+(q.length-1)+' add-ons'+(total>0?' ('+fmtSize(total)+')':'')+' — check the console.';
+loadSpace();}
+async function copyImg(id,file,size){msg.textContent='Copying '+file+'...';
+var mode='overwrite';
+try{var st=await fetch('/api/files/stat?path='+encodeURIComponent('/data/homebrew/'+file));
+var stx=await st.text();
+var sj=(stx.indexOf('error:')===0)?{exists:false,size:0}:JSON.parse(stx);
+if(sj.exists&&size>0&&sj.size===size)
+{if(!confirm(file+' is already there. OK = Overwrite, Cancel = stop.'))return;mode='overwrite';}
+else if(sj.exists&&sj.size>0&&sj.size<size)
+mode=confirm('Partial copy on console ('+fmtSize(sj.size)+' of '+fmtSize(size)+'). OK = Resume, Cancel = Overwrite from zero.')?'resume':'overwrite';}
+catch(ex){}
+try{var r=await fetch('/api/files/pull',{method:'POST',headers:{'Content-Type':'application/json'},
+body:JSON.stringify({url:'http://'+pcEl.value+':9898/pkg/'+id,path:'/data/homebrew/'+file,mode:mode})});
+var x=await r.text();
+if(x.indexOf('started')<0){msg.textContent=x;return;}
+copCancelled=false;copPaused=false;
+document.getElementById('copPause').textContent='Pause';
+document.getElementById('copctl').style.display='';
+var lastGot=0,lastT=Date.now();
+for(var i=0;i<1800;i++){await new Promise(function(rs){setTimeout(rs,2000);});
+try{var s=await fetch('/api/status');var j=await s.json();
+if(!j.pull){copHide();
+if(copCancelled){msg.className='';msg.textContent='Copy cancelled: '+file+' (partial stays for resume).';}
+else{msg.className='ok';msg.textContent='Done: '+file+' — check the console.';loadSpace();}
+return;}
+var now=Date.now(),spd='';
+if(now>lastT&&j.pullGot>=lastGot)spd=' • '+fmtSpd((j.pullGot-lastGot)*1000/(now-lastT));
+lastGot=j.pullGot;lastT=now;
+setBar(j.pullGot,j.pullWant);
+var pp=j.pullPaused?' (paused)':'';
+if(j.pullWant>0){var pc=Math.floor(j.pullGot*100/j.pullWant);
+msg.textContent='Copying '+file+': '+pc+'% ('+fmtSize(j.pullGot)+' / '+fmtSize(j.pullWant)+')'+spd+pp;}
+else msg.textContent='Copying '+file+': '+fmtSize(j.pullGot)+spd+pp;}
+catch(ex){msg.textContent='Copy started — watch the console notifications.';return;}}
+copHide();msg.textContent='Copy started — watch the console notifications.';}
+catch(ex){copHide();msg.textContent='Error: '+ex;}}
+var copCancelled=false,copPaused=false;
+function copHide(){document.getElementById('copctl').style.display='none';document.getElementById('qbar').style.display='none';}
+async function copPauseToggle(){copPaused=!copPaused;
+try{await fetch('/api/pull/pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:copPaused?1:0})});}catch(ex){}
+document.getElementById('copPause').textContent=copPaused?'Resume':'Pause';}
+async function copCancel(){copCancelled=true;
+try{await fetch('/api/pull/cancel',{method:'POST'});}catch(ex){}}
+function imgIcon(f){if(f==='exfat')return '💽';if(f==='ffpkg'||f==='ffpfsc')return '🗜';return '📦';}
+function fmtColor(f){if(f==='exfat')return '#34B595';if(f==='ffpfsc')return '#CE9C40';if(f==='ffpkg')return '#A27AD8';return '#6498F0';}
+function famOf(g){var f=all.filter(function(m){return m.format==='pkg'&&!isBase(m)&&m.familyKey===g.familyKey;});
+f.sort(function(a,b){return rank(a.role)-rank(b.role);});return f;}
+function openModal(g){
+var box=document.getElementById('mbox');box.innerHTML='';
+var xx=document.createElement('button');xx.className='mx';xx.textContent='×';
+xx.onclick=closeModal;box.appendChild(xx);
+var meta=esc(g.titleId||'');if(g.version)meta+=' v'+esc(g.version);
+if(g.sizeText)meta+=' &middot; '+esc(g.sizeText);
+var h=document.createElement('h3');h.textContent=g.title;box.appendChild(h);
+var mm=document.createElement('div');mm.className='mm';mm.innerHTML=meta+' '+platBadge(g.platform);box.appendChild(mm);
+var fam=famOf(g);
+var ib=document.createElement('button');ib.className='go';ib.textContent='Install game';
+ib.onclick=function(){install(g.id,g.title);};box.appendChild(ib);
+if(fam.length){
+var ab=document.createElement('button');ab.className='go';ab.style.background='#34B595';
+ab.textContent='Install all ('+(fam.length+1)+' packages)';
+ab.onclick=function(){installAll(g);};box.appendChild(ab);
+var patches=fam.filter(function(m){return m.role==='Patch';});
+var dlcs=fam.filter(function(m){return m.role!=='Patch';});
+var fbox=document.createElement('div');fbox.className='fambox';
+function grp(t,arr){if(!arr.length)return;var hh=document.createElement('div');hh.className='famgrp';hh.textContent=t+' ('+arr.length+')';fbox.appendChild(hh);arr.forEach(function(m){fbox.appendChild(card(m,1));});}
+grp('Patches',patches);grp('DLC',dlcs);box.appendChild(fbox);}
+var cb=document.createElement('button');cb.className='mclose';cb.textContent='Close';
+cb.onclick=closeModal;box.appendChild(cb);
+document.getElementById('movl').style.display='';
+document.body.style.overflow='hidden';
+setTimeout(function(){var x=document.querySelector('#mbox .mx');if(x)x.focus();},50);}
+function closeModal(){document.getElementById('movl').style.display='none';document.body.style.overflow='';}
+function platBadge(p){if(p==='PS5')return '<span class=bdg style="background:#F1F3F8;color:#171717">PS5</span>';if(p==='PS4')return '<span class=bdg style="background:#0070D1;color:#fff">PS4</span>';return '';}
+function covCls(g){return g.platform==='PS4'?'cov4':'cov5';}
+function iconURI(id){var it=null;for(var k=0;k<__catalog.length;k++)if(__catalog[k].id===id)it=__catalog[k];
+var bg=(!it||it.platform!=='PS4')?'#0070D1':'#4F8EF7';
+var tn=it?it.title:id;
+var svg="<svg xmlns='http://www.w3.org/2000/svg' width='512' height='512'><rect width='100%' height='100%' fill='"+bg+"'/><text x='50%' y='50%' fill='white' font-size='36' text-anchor='middle' font-family='sans-serif'>"+String(tn).replace(/&/g,'&amp;').replace(/</g,'&lt;')+"</text></svg>";
+return 'data:image/svg+xml;utf8,'+encodeURIComponent(svg);}
+function card(g,sub){var d=document.createElement('div');d.className=sub?'member':'card';
+var im=(!sub)?(g.hasIcon?'<img class="'+covCls(g)+'" src="'+iconURI(g.id)+'">':'<div class="cov '+covCls(g)+'"><span>🎮</span></div>'):'';
+var meta=esc(g.titleId||'');if(g.version)meta+=' v'+esc(g.version);
+if(g.sizeText)meta+=' &middot; '+esc(g.sizeText);
+var badge=sub?(g.role==='Patch'?'<span class=rb style="background:#E17B7B">Patch</span>':(g.role==='DLC'?'<span class=rb style="background:#E8A34C">DLC</span>':'<span class=rb>'+esc(g.role)+'</span>')):'';
+if(sub){d.innerHTML='<div><div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div></div>';
+var w=document.createElement('div');w.innerHTML=badge;
+var b=document.createElement('button');b.textContent='Install';
+b.onclick=function(ev){ev.stopPropagation();install(g.id,g.title);};
+w.appendChild(b);d.appendChild(w);return d;}
+if(kind==='images'){
+var cov=g.hasIcon?'<img class="'+covCls(g)+'" src="'+iconURI(g.id)+'">':'<div class="cov '+covCls(g)+'"><span>'+imgIcon(g.format)+'</span></div>';
+var fb='<span style="display:inline-block;background:'+fmtColor(g.format)+';color:#fff;font-size:15px;font-weight:bold;border-radius:4px;padding:3px 10px">'+esc((g.format||'img').toUpperCase())+'</span>';
+d.innerHTML=cov+'<div class=t>'+esc(g.title)+'</div><div class=m>'+fb+' &middot; '+esc(g.sizeText||'')+'</div>';
+var cb=document.createElement('button');cb.textContent='Copy to homebrew';
+cb.onclick=function(ev){ev.stopPropagation();copyImg(g.id,g.file||g.title,g.size||0);};d.appendChild(cb);return d;}
+var fam=famOf(g);
+var cnt=fam.length?'<span class=fc>'+fam.length+' add-on'+(fam.length>1?'s':'')+'</span>':'';
+var pb=platBadge(g.platform);
+d.innerHTML=im+'<div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div>'+(pb?'<div class=badges>'+pb+'</div>':'')+cnt;
+var ib=document.createElement('button');ib.textContent='Install';
+ib.onclick=function(ev){ev.stopPropagation();install(g.id,g.title);};d.appendChild(ib);
+d.onclick=function(){openModal(g);};
+d.tabIndex=0;
+d.onkeydown=function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();openModal(g);}};
+return d;}
+function render(){grid.innerHTML='';var list;
+if(kind==='images'){list=all.filter(function(g){return g.format!=='pkg'&&matchP(g)&&matchQ(g);});
+list.sort(function(a,b){return a.title.toLowerCase()<b.title.toLowerCase()?-1:1;});
+if(!list.length){msg.textContent=all.length?'No match.':'Library is empty — tick Publish library in PKG Sender.';return;}
+msg.textContent=list.length+' images';
+list.forEach(function(g){grid.appendChild(card(g,0));});return;}
+var bases=all.filter(function(g){return g.format==='pkg'&&isBase(g)&&matchP(g)&&matchQ(g);});
+bases.sort(function(a,b){return a.title.toLowerCase()<b.title.toLowerCase()?-1:1;});
+if(!bases.length){msg.textContent=all.length?'No match.':'Library is empty — tick Publish library in PKG Sender.';return;}
+msg.textContent=bases.length+' games';
+bases.forEach(function(g){grid.appendChild(card(g,0));});}
+document.getElementById('movl').onclick=function(ev){if(ev.target.id==='movl')closeModal();};
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape')closeModal();});
+async function resolvePc(){
+try{var r=await fetch('/api/pc');var j=await r.json();
+if(j.pc&&j.age>=0&&j.age<15){pcEl.value=j.pc;pcstat.textContent='PC: '+j.pc+' (auto)';return j.pc;}}catch(e){}
+var m=(pcEl.value||localStorage.getItem('pri_pc')||'').trim();
+if(m){pcEl.value=m;pcstat.textContent='PC: '+m+' (manual)';return m;}
+pcstat.textContent='PC: ?';return '';}
+async function load(){var pc=await resolvePc();
+if(!pc){msg.textContent='No PC found — tick Publish library in PKG Sender, or type the PC address.';document.getElementById('pcrow').style.display='';return;}
+localStorage.setItem('pri_pc',pc);msg.textContent='Loading...';grid.innerHTML='';all=[];
+try{var r=await fetch('http://'+pc+':9898/catalog');
+all=await r.json();openFam=null;render();loadSpace();}
+catch(ex){msg.textContent='Error: '+ex+' — is Publish library on and the PC reachable?';}}
+function frow(e){var d=document.createElement('div');d.className='frow';
+var ic=e.dir?'📁':'📄';
+var sub=e.dir?'':(' &middot; '+fmtSize(e.size));
+d.innerHTML='<div><span>'+ic+'</span> '+esc(e.name)+'<div class=m>'+(e.dir?'folder':('file'+sub))+'</div></div>';
+var w=document.createElement('div');
+function mkb(t,cls,fn){var b=document.createElement('button');b.className=cls;b.textContent=t;b.onclick=fn;w.appendChild(b);}
+if(e.dir)mkb('Open','gh',function(){fpath=fpath+'/'+e.name;fsLoad();});
+mkb('Info','gh',function(){fsInfo(e.name);});
+mkb('Copy','gh',function(){fsCopy(e.name,e.dir);});
+mkb('Move','gh',function(){fsMove(e.name);});
+mkb('Rename','gh',function(){fsRename(e.name);});
+mkb('Delete','danger',function(){if(confirm('Delete '+e.name+(e.dir?' (with everything inside)?':'?')))fsDel(e.name);});
+d.appendChild(w);return d;}
+async function fsApi(ep,obj){var fm=document.getElementById('fmsg');
+try{var r=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});
+var x=await r.text();fm.textContent=x;if(x.indexOf('ok')>=0)fsLoad();}
+catch(ex){fm.textContent='Error: '+ex;}}
+async function fsRename(name){var nn=prompt('Rename to:',name);
+if(!nn||nn===name)return;
+fsApi('/api/fs/rename',{from:fpath+'/'+name,to:fpath+'/'+nn});}
+async function fsCopy(name,isDir){var dst=prompt('Copy to folder:',fpath);
+if(!dst)return;
+fsApi('/api/fs/copy',{src:fpath+'/'+name,dst:dst+'/'+name});}
+async function fsMove(name){var dst=prompt('Move to folder:',fpath);
+if(!dst||dst===fpath)return;
+fsApi('/api/fs/move',{src:fpath+'/'+name,dst:dst+'/'+name});}
+async function fsInfo(name){var fm=document.getElementById('fmsg');
+try{var r=await fetch('/api/fs/info?path='+encodeURIComponent(fpath+'/'+name));
+var txt=await r.text();
+if(txt.charAt(0)!=='{'){fm.textContent='Reply: '+txt.substring(0,120);return;}
+var j=JSON.parse(txt);
+fm.textContent=j.name+' • '+j.kind+' • '+fmtSize(j.size)+' • '+j.magic;}
+catch(ex){fm.textContent='Error: '+ex;}}
+async function fsLoad(){var fp=document.getElementById('fpath');fp.textContent=fpath;
+var fl=document.getElementById('flist');var fm=document.getElementById('fmsg');
+fm.textContent='Loading...';fl.innerHTML='';
+try{var r=await fetch('/api/fs/list?path='+encodeURIComponent(fpath));
+var txt=await r.text();
+if(txt.charAt(0)!=='{'){fm.textContent='Reply: '+txt.substring(0,60);
+try{var g=await fetch('/api/dbg');var gj=await g.text();fm.textContent+=' | prev: '+gj.substring(0,120);}catch(ex){}
+return;}
+var j=JSON.parse(txt);fm.textContent=j.entries.length+' entries'+(j.truncated?' (truncated)':'');
+j.entries.forEach(function(e){fl.appendChild(frow(e));});}
+catch(ex){fm.textContent='Error: '+ex;}}
+async function fsDel(name){var fm=document.getElementById('fmsg');
+try{var r=await fetch('/api/fs/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+body:JSON.stringify({path:fpath+'/'+name})});
+var x=await r.text();fm.textContent=x;if(x.indexOf('ok')>=0)fsLoad();}
+catch(ex){fm.textContent='Error: '+ex;}}
+async function fsMkdir(){var inp=document.getElementById('mkname');var nm=inp.value.trim();
+if(!nm)return;var fm=document.getElementById('fmsg');
+try{var r=await fetch('/api/files/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},
+body:JSON.stringify({path:fpath+'/'+nm})});
+var x=await r.text();fm.textContent=x;inp.value='';fsLoad();}
+catch(ex){fm.textContent='Error: '+ex;}}
+document.getElementById('save').onclick=load;
+document.getElementById('reload').onclick=load;
+document.getElementById('pcstat').onclick=function(){var r=document.getElementById('pcrow');r.style.display=(r.style.display==='none')?'':'none';};
+pcEl.onkeydown=function(ev){if(ev.key==='Enter')load();};
+document.getElementById('mkbtn').onclick=fsMkdir;
+document.getElementById('up').onclick=function(){var roots=['/data','/mnt/usb0','/mnt/usb1','/mnt/usb2','/mnt/usb3'];
+if(roots.indexOf(fpath)>=0)return;var i=fpath.lastIndexOf('/');fpath=i>0?fpath.substring(0,i):'/data';fsLoad();};
+var ub=document.getElementById('usbrow').children;
+for(var u=0;u<ub.length;u++)(function(c){c.onclick=function(){fpath=c.getAttribute('data-u');fsLoad();};})(ub[u]);
+qEl.oninput=render;
+var chips=document.getElementById('chips').children;
+for(var i=0;i<chips.length;i++)(function(c){c.onclick=function(){plat=c.getAttribute('data-p');
+var kd=document.getElementById('kind');
+if(plat==='PS4'){kd.style.display='none';kind='games';
+for(var k=0;k<kinds.length;k++)kinds[k].className=kinds[k].getAttribute('data-k')==='games'?'on':'';}
+else kd.style.display='';
+for(var k=0;k<chips.length;k++)chips[k].className='';c.className='on';render();};})(chips[i]);
+var kinds=document.getElementById('kind').children;
+for(var j=0;j<kinds.length;j++)(function(c){c.onclick=function(){kind=c.getAttribute('data-k');
+for(var k=0;k<kinds.length;k++)kinds[k].className='';c.className='on';render();};})(kinds[j]);
+load();})();</script>
+</body></html>

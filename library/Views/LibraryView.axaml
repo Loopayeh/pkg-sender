@@ -19,7 +19,7 @@
   <Design.DataContext>
     <vm:LibraryViewModel/>
   </Design.DataContext>
-  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" DragDrop.AllowDrop="True" Name="DropRoot">
     <!-- compact bar (only visible in compact mode) -->
     <Border Grid.Row="0" Name="CompactBar" IsVisible="False" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="12,8">
       <Grid ColumnDefinitions="Auto,Auto,*,Auto">
@@ -66,14 +66,15 @@
     <!-- toolbar -->
     <Border Grid.Row="2" Name="ToolbarBar" Background="#202020" BorderBrush="#2A2A2A" BorderThickness="0,0,0,1" Padding="16,10">
       <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
           <Button Grid.Column="0" Content="Scan drives…" Name="BtnAddDrive" MinWidth="120" Margin="0,0,8,0" ToolTip.Tip="Pick drive(s) to search for PKG files"/>
           <Button Grid.Column="1" Content="+ Add folder" Name="BtnAddFolder" Classes="ghost" Margin="0,0,8,0"/>
           <Button Grid.Column="2" Content="Scan" Name="BtnScan" Classes="ghost" Margin="0,0,8,0" ToolTip.Tip="Scan added folders only (drives: Scan drives…)"/>
-          <Border Grid.Column="3" Background="#2A2A2A" Width="1" Margin="4,4,12,4"/>
-          <ComboBox Grid.Column="4" Name="PlatformBox" Width="110" Margin="0,0,8,0"/>
-          <ComboBox Grid.Column="5" Name="SortBox" Width="130" Margin="0,0,8,0" ToolTip.Tip="Sort library"/>
-          <CheckBox Grid.Column="6" Content="Hide DLC/updates" IsChecked="{Binding HideExtras, Mode=TwoWay}"
+          <Button Grid.Column="3" Content="Clear cache" Name="BtnClearCache" Classes="ghost" Margin="0,0,8,0" ToolTip.Tip="Forget saved game info and rescan everything from scratch"/>
+          <Border Grid.Column="4" Background="#2A2A2A" Width="1" Margin="4,4,12,4"/>
+          <ComboBox Grid.Column="5" Name="PlatformBox" Width="110" Margin="0,0,8,0"/>
+          <ComboBox Grid.Column="6" Name="SortBox" Width="130" Margin="0,0,8,0" ToolTip.Tip="Sort library"/>
+          <CheckBox Grid.Column="7" Content="Hide DLC/updates" IsChecked="{Binding HideExtras, Mode=TwoWay}"
                     VerticalAlignment="Center" Foreground="#8B93A5" FontSize="12"
                     ToolTip.Tip="Show only base games — click 🔗×N on a card to see its updates/DLCs"/>
         </Grid>

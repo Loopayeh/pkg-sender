@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -135,6 +136,18 @@ public partial class LibraryView : UserControl
                 RefreshReorderFlags();
         };
         this.FindControl<Button>("BtnAddFolder").Click += async (_, _) => await AddFolderAsync("Add a folder to scan for games");
+        // Drag & drop: files/folders dropped anywhere on the window are
+        // added as scan roots (folders directly, files via parent dir).
+        var dropRoot = this.FindControl<Grid>("DropRoot");
+        if (dropRoot != null)
+        {
+            dropRoot.AddHandler(DragDrop.DragOverEvent, (_, e) =>
+            {
+                if (e.Data.Contains(DataFormats.Files))
+                    e.DragEffects = DragDropEffects.Copy;
+            });
+            dropRoot.AddHandler(DragDrop.DropEvent, async (_, e) => await DropAsync(e));
+        }
         this.FindControl<Button>("BtnClearSearch").Click += (_, _) => { _m.Search = ""; ImmediateFilter(); };
         this.FindControl<Button>("BtnClearFilter").Click += (_, _) => { _m.Search = ""; ImmediateFilter(); };
         this.FindControl<CheckBox>("CompactBox").Checked += (_, _) => SetCompact(true);
@@ -200,6 +213,7 @@ public partial class LibraryView : UserControl
         this.FindControl<Button>("BtnAddDrive").Click += async (_, _) => await AddDriveAsync();
         this.FindControl<Button>("BtnTest").Click += async (_, _) => await TestConnectionAsync();
         this.FindControl<Button>("BtnScan").Click += async (_, _) => await ScanFoldersAsync();
+        this.FindControl<Button>("BtnClearCache").Click += async (_, _) => await ClearCacheAsync();
         this.FindControl<Button>("BtnSend").Click += (_, _) => EnqueuePkgs();
         this.FindControl<Button>("BtnCopy").Click += async (_, _) => await CopyImagesAsync();
         this.FindControl<Button>("BtnAbout").Click += async (_, _) =>
@@ -283,8 +297,14 @@ public partial class LibraryView : UserControl
         this.FindControl<ListBox>("GamesList").AddHandler(Button.ClickEvent, OnCardLinkClick);
         // Per-row Resume buttons live inside the queue DataTemplate.
         this.FindControl<ListBox>("QueueList").AddHandler(Button.ClickEvent, OnQueueButtonClick);
-        // No auto-scan at startup: the user presses Scan when ready.
-        _m.Status = _roots.Count == 0 ? "Add a folder or drives first." : "Press Scan to load the library.";
+        // Instant library from cache (no rescan); Scan refreshes.
+        if (_roots.Count == 0)
+            _m.Status = "Add a folder or drives first.";
+        else
+        {
+            _m.Status = "Loading library from cache…";
+            LoadCacheAtStartup();
+        }
     }
 
     private static string AddrOf(string? item)
@@ -916,6 +936,92 @@ public partial class LibraryView : UserControl
         }
     }
 
+    private static readonly HashSet<string> DropExts = new(StringComparer.OrdinalIgnoreCase)
+        { ".pkg", ".exfat", ".ffpfsc", ".ffpkg" };
+
+    /// <summary>
+    /// Drag & drop: folders become scan roots; loose game files pull in
+    /// their parent folder (merge scan, so the screen never resets).
+    /// </summary>
+    private async Task DropAsync(DragEventArgs e)
+    {
+        var files = e.Data.GetFiles()?.ToList();
+        if (files == null || files.Count == 0)
+            return;
+        var added = new List<string>();
+        int loose = 0;
+        foreach (var f in files)
+        {
+            string p = f.Path.LocalPath;
+            if (Directory.Exists(p))
+            {
+                if (!_roots.Contains(p, StringComparer.OrdinalIgnoreCase))
+                {
+                    _roots.Add(p);
+                    added.Add(p);
+                }
+            }
+            else if (File.Exists(p) && DropExts.Contains(Path.GetExtension(p)))
+            {
+                string? dir = Path.GetDirectoryName(p);
+                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir) &&
+                    !_roots.Contains(dir, StringComparer.OrdinalIgnoreCase))
+                {
+                    _roots.Add(dir);
+                    added.Add(dir);
+                }
+                loose++;
+            }
+        }
+        if (added.Count > 0)
+        {
+            LibraryScanner.SaveRoots(_roots);
+            await ScanAsync(added, merge: true);
+        }
+        else if (loose > 0)
+        {
+            _m.Status = "Dropped files are already in the library.";
+        }
+        else
+        {
+            _m.Status = "Drop game folders or .pkg/.exfat/.ffpkg/.ffpfsc files.";
+        }
+    }
+
+    /// <summary>
+    /// Clear cache button: forget saved game info, rescan folders fresh.
+    /// Roots are kept — only the parsed game data is dropped.
+    /// </summary>
+    private async Task ClearCacheAsync()
+    {
+        if (_m.IsBusy)
+            return;
+        LibraryScanner.ClearGameCache();
+        _m.Status = "Cache cleared — rescanning…";
+        await ScanFoldersAsync();
+    }
+
+    /// <summary>
+    /// Instant library at startup: show cached games immediately (stat
+    /// checks only), no rescan. Runs once; never clobbers a live scan.
+    /// </summary>
+    private void LoadCacheAtStartup()
+    {
+        if (_roots.Count == 0)
+            return;
+        _ = Task.Run(() =>
+        {
+            var cached = LibraryScanner.LoadCachedScans();
+            Post(() =>
+            {
+                if (cached.Count == 0 || _all.Count > 0 || _m.IsBusy)
+                    return;
+                FillList(cached, merge: false);
+                _m.Status = $"{_all.Count} games from cache — press Scan to refresh.";
+            });
+        });
+    }
+
     /// <summary>
     /// The Scan button: added folders only, never drives. Replaces the list.
     /// </summary>
@@ -947,8 +1053,17 @@ public partial class LibraryView : UserControl
         {
             var prog = new Progress<string>(s => Post(() => _m.Status = s));
             var found = await LibraryScanner.ScanAsync(roots, prog);
-            Post(() =>
-            {
+            Post(() => FillList(found, merge));
+        }
+        finally
+        {
+            Post(() => _m.IsBusy = false);
+        }
+    }
+
+    /// <summary>Render scanned (or cached) games into the card list.</summary>
+    private void FillList(List<LibraryScanner.ScannedGame> found, bool merge)
+    {
                 if (!merge)
                     _all.Clear();
                 else if (found.Count > 0)
@@ -1009,12 +1124,6 @@ public partial class LibraryView : UserControl
                 _m.Status = _all.Count == 0
                     ? (_roots.Count == 0 ? "Add a folder or drives first." : "No PKG files found.")
                     : $"{_all.Count} games in library.";
-            });
-        }
-        finally
-        {
-            Post(() => _m.IsBusy = false);
-        }
     }
 
     private async Task TestConnectionAsync()

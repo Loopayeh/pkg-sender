@@ -9,6 +9,7 @@
  *   GET  /api            - probe (open, no action)
  *   GET  /api/status     - {"busy":true/false,"active":N} install state
  *   GET  /api/pc         - {"pc":"1.2.3.4","age":N} last PC announce
+ *   GET  /api/space      - {"free":N,"total":N} /data disk space
  *                          (the PC broadcasts "PKGSENDER-PC ip:port" to UDP
  *                          12802 while Publish library is on; browsers can't
  *                          hear UDP, so we re-serve it here)
@@ -50,6 +51,7 @@
 #include <netdb.h>
 #include <sys/time.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysctl.h>
@@ -192,7 +194,7 @@ installer_init(void)
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
 /* bump on every behavior change; the page shows receiver vs page tags */
-#define RECEIVER_BUILD "20260920-18"
+#define RECEIVER_BUILD "20260921-02"
 
 __asm__(
 ".section .rodata\n"
@@ -223,6 +225,21 @@ __asm__(
 ".previous\n");
 extern const unsigned char launcher_icon[];
 extern const size_t launcher_icon_size;
+
+__asm__(
+".section .rodata\n"
+".global sender_logo\n"
+".global sender_logo_end\n"
+".global sender_logo_size\n"
+".align 16\n"
+"sender_logo:\n"
+".incbin \"logo.png\"\n"
+"sender_logo_end:\n"
+"sender_logo_size:\n"
+".quad sender_logo_end - sender_logo\n"
+".previous\n");
+extern const unsigned char sender_logo[];
+extern const size_t sender_logo_size;
 
 typedef int (*titledir_fn)(const char *, const char *, void *);
 
@@ -515,6 +532,22 @@ send_json(int fd, const char *body)
 
 	send_all(fd, hdr, (size_t)hlen);
 	send_all(fd, body, strlen(body));
+}
+
+static void
+send_png(int fd, const unsigned char *data, size_t len)
+{
+	char hdr[256];
+	int hlen = snprintf(hdr, sizeof(hdr),
+	    "HTTP/1.0 200 OK\r\n"
+	    "Content-Type: image/png\r\n"
+	    "Content-Length: %lu\r\n"
+	    "Cache-Control: max-age=86400\r\n"
+	    "Connection: close\r\n"
+	    "\r\n", (unsigned long)len);
+
+	send_all(fd, hdr, (size_t)hlen);
+	send_all(fd, (const char *)data, len);
 }
 
 /* %XX -> byte, + -> space. dst must fit URL_MAX. */
@@ -964,7 +997,22 @@ static const char UI_HTML[] =
 "<!DOCTYPE html><html><head><meta charset=utf-8>"
 "<meta name=viewport content='width=device-width,initial-scale=1'>"
 "<title>pkg remote installer</title>"
+"<link rel=icon type='image/png' href='/logo.png'>"
 "<style>body{background:#171717;color:#F1F3F8;font-family:'Segoe UI',sans-serif;margin:0;padding:24px;font-size:19px}"
+".wrap{max-width:1100px;margin:0 auto}"
+".hd{display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap}"
+".hd h2{margin:0;font-size:26px;flex:1}"
+".hd #ver{font-size:12px;color:#8B93A5}"
+".hd #pcstat{font-size:12px;color:#6FCF7B;background:#202020;border:1px solid #2A2A2A;border-radius:12px;padding:6px 12px;white-space:nowrap;cursor:pointer}"
+".hd #space{font-size:12px;color:#8B93A5;background:#202020;border-radius:12px;padding:6px 12px;white-space:nowrap}"
+"#qbar{height:8px;background:#2A2A2A;border-radius:4px;margin-top:8px;display:none;overflow:hidden}"
+"#copctl{margin-top:10px;display:flex;gap:8px}"
+"#copctl button{flex:1;font-size:17px;padding:13px}"
+"#qfill{height:100%;width:0;background:#4F8EF7;border-radius:4px}"
+"button:focus-visible,input:focus-visible,.card:focus{outline:3px solid #4F8EF7;outline-offset:2px}"
+".card{cursor:pointer}"
+"#pcrow input{padding:12px;font-size:16px}"
+"#pcrow button.go,#pcrow button.gh{padding:12px 16px;font-size:16px}"
 "h2{color:#F1F3F8;margin:0 0 14px;font-size:30px}"
 "#tabs{display:flex;gap:8px;margin-bottom:14px}"
 "#tabs button{flex:1;padding:18px;background:#2A2A2A;border:none;border-radius:6px;color:#F1F3F8;font-size:21px;font-weight:bold;cursor:pointer}"
@@ -981,14 +1029,34 @@ static const char UI_HTML[] =
 "button.go{padding:16px 22px;background:#4F8EF7;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer}"
 "button.gh{padding:14px 20px;background:#404040;border:none;border-radius:6px;color:#F1F3F8;font-size:19px;cursor:pointer}"
 "button.danger{padding:14px 20px;background:#E17B7B;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer}"
-"#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}"
-".card{background:#202020;border-radius:10px;padding:14px;text-align:center}"
-".card img{width:100%;height:170px;object-fit:contain;background:#171717}"
+"#grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}"
+"@media(max-width:1100px){#grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}}"
+".card{background:#202020;border-radius:10px;padding:14px;text-align:center;transition:transform .12s,box-shadow .12s;display:flex;flex-direction:column;position:relative}"
+".card:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.5)}"
+".card img{width:100%;height:auto;object-fit:contain;background:#202020;display:block}"
+".card img.cov5{border-radius:14px}"
+".card img.cov4{border-radius:0}"
+".cov{width:100%;aspect-ratio:1/1;min-height:170px;background:#202020;display:flex;align-items:center;justify-content:center}"
+".cov.cov5{border-radius:14px}"
+".cov.cov4{border-radius:0}"
+".cov span{font-size:56px;opacity:.35}"
+".badges{position:absolute;top:30px;left:24px;display:flex;gap:6px}"
+".bdg{font-size:11px;font-weight:bold;border-radius:4px;padding:2px 8px}"
 ".card .t{font-size:18px;margin:10px 0 4px;min-height:44px}"
 ".card .m{font-size:15px;color:#8B93A5;margin-bottom:10px}"
-".card button{width:100%;padding:15px;background:#4F8EF7;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer}"
+".card button{width:100%;padding:15px;background:#4F8EF7;border:none;border-radius:6px;color:#171717;font-size:19px;font-weight:bold;cursor:pointer;margin-top:auto}"
+".card .fc{margin-bottom:10px}"
+".card button.sec{margin-top:8px;background:#2A2A2A;color:#F1F3F8}"
 ".card.sel{outline:2px solid #4F8EF7}"
 ".fampanel{grid-column:1/-1;background:#202020;border-radius:8px;padding:10px}"
+".famgrp{font-size:12px;font-weight:bold;color:#8B93A5;padding:8px 12px 4px;text-align:left}"
+".movl{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.88);z-index:9999}"
+".mbox{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#202020;border:1px solid #4F8EF7;border-radius:12px;width:560px;max-width:calc(100% - 40px);max-height:calc(100% - 40px);overflow-y:auto;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.7);z-index:10000}"
+".mbox h3{margin:0 0 4px;font-size:22px;padding-right:52px}"
+".mx{position:absolute;top:12px;right:12px;width:44px;height:44px;font-size:24px;line-height:1;background:#2A2A2A;border:none;border-radius:8px;color:#F1F3F8;cursor:pointer}"
+".mbox .mm{font-size:14px;color:#8B93A5;margin-bottom:12px}"
+".mbox button.go{width:100%;margin-bottom:8px}"
+".mclose{width:100%;padding:12px;background:#2A2A2A;border:none;border-radius:6px;color:#F1F3F8;font-size:16px;cursor:pointer;margin-top:4px}"
 ".big{font-size:64px}"
 ".fc{display:inline-block;font-size:15px;color:#4F8EF7;border:1px solid #4F8EF7;border-radius:12px;padding:4px 12px;margin-top:6px}"
 ".fambox{margin-top:8px;display:flex;flex-direction:column;gap:8px}"
@@ -1006,18 +1074,17 @@ static const char UI_HTML[] =
 ".frow div:first-child{flex:1;font-size:17px}"
 ".frow .m{font-size:13px;color:#8B93A5}"
 ".frow div:last-child{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}"
-".frow button{font-size:15px;padding:10px 14px}</style></head><body>"
+".frow button{font-size:15px;padding:10px 14px}</style></head><body><div class=wrap>"
 
-"<h2>pkg remote installer</h2>"
-"<div id=ver style='font-size:15px;color:#8B93A5;margin-bottom:12px'>page …</div>"
+"<div class=hd><img src='/logo.png' alt='logo' style='height:44px;width:auto;border-radius:8px'><h2>pkg remote installer</h2><span id=ver>page ...</span><button id=pcstat>PC: ...</button><span id=space style='display:none'></span></div>"
 "<div id=tabs style='display:none'><button id=tabL class=on>Library</button><button id=tabF style='display:none'>Files</button></div>"
 "<div id=lib>"
-"<div id=pcrow><span id=pcstat>PC: ...</span>"
+"<div id=pcrow style='display:none'>"
 "<input id=pc placeholder='PC address'><button class=go id=save>Save</button><button class=gh id=reload>Refresh</button></div>"
 "<div id=tools><input id=q placeholder='Search title or ID...'>"
 "<div id=chips><button data-p=all class=on>All</button><button data-p=PS5>PS5</button><button data-p=PS4>PS4</button></div></div>"
 "<div id=kind><button data-k=games class=on>Games</button><button data-k=images>Images</button></div>"
-"<div id=grid></div><div id=msg></div></div>"
+"<div id=grid></div><div id=msg></div><div id=qbar><div id=qfill></div></div><div id=copctl style='display:none'><button class=gh id=copPause>Pause</button><button class=danger id=copCancel>Cancel copy</button></div></div>"
 "<div id=files style='display:none'>"
 "<div id=usbrow><button class=gh data-u='/data'>Data</button>"
 "<button class=gh data-u='/mnt/usb0'>USB0</button>"
@@ -1027,7 +1094,7 @@ static const char UI_HTML[] =
 "<div id=crumb><button class=gh id=up>Up</button><span id=fpath>/data</span></div>"
 "<div id=mkrow><input id=mkname placeholder='New folder name'><button class=go id=mkbtn>New folder</button></div>"
 "<div id=flist></div><div id=fmsg></div></div>"
-"<script>(function(){var PAGE_BUILD='" RECEIVER_BUILD "';"
+"</div><div id=movl style='display:none'><div class=mbox id=mbox></div></div><script>(function(){var PAGE_BUILD='" RECEIVER_BUILD "';"
 "var verd=document.getElementById('ver');"
 "verd.textContent='page '+PAGE_BUILD+' • receiver …';"
 "fetch('/api/version').then(function(r){return r.text();}).then(function(t){"
@@ -1040,6 +1107,14 @@ static const char UI_HTML[] =
 "var grid=document.getElementById('grid');var msg=document.getElementById('msg');"
 "var qEl=document.getElementById('q');"
 "var all=[],openFam=null,plat='all',kind='games';"
+"var freeBytes=-1;"
+"async function loadSpace(){var sp=document.getElementById('space');"
+"try{var r=await fetch('/api/space');var j=await r.json();"
+"if(j.free>=0){freeBytes=j.free;sp.textContent='Free '+fmtSize(j.free)+' / '+fmtSize(j.total);sp.style.display='';}}"
+"catch(ex){sp.style.display='none';}}"
+"function qTotal(q){var t=0;for(var i=0;i<q.length;i++)t+=(q[i].size||0);return t;}"
+"function setBar(done,total){var b=document.getElementById('qbar'),f=document.getElementById('qfill');"
+"if(total>0){b.style.display='';f.style.width=Math.min(100,Math.floor(done*100/total))+'%';}else b.style.display='none';}"
 "var fpath='/data';"
 "pcEl.value=localStorage.getItem('pri_pc')||'';"
 "function show(t){document.getElementById('lib').style.display=t?'':'none';"
@@ -1048,6 +1123,8 @@ static const char UI_HTML[] =
 "document.getElementById('tabF').className=t?'':'on';"
 "if(!t)fsLoad();}"
 "document.getElementById('tabL').onclick=function(){show(1);};"
+"document.getElementById('copPause').onclick=function(){copPauseToggle();};"
+"document.getElementById('copCancel').onclick=function(){copCancel();};"
 "document.getElementById('tabF').onclick=function(){show(0);};"
 "function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}"
 "function fmtSize(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';"
@@ -1066,14 +1143,49 @@ static const char UI_HTML[] =
 "if(hasIcon)q+='&icon='+encodeURIComponent('http://'+pcEl.value+':9898/icon/'+encodeURIComponent(id));"
 "var r=await fetch(q);"
 "var t=await r.text();"
-"if(t.indexOf('ok:')===0){msg.className='ok';msg.textContent=t+' — watch the console notifications.';pollBusy(name);}"
+"if(t.indexOf('ok:')===0){msg.className='ok';msg.textContent=t+' — watch the console notifications.';pollBusy(name).then(function(){loadSpace();});}"
 "else{msg.className='err';msg.textContent=t;}}catch(ex){msg.className='err';msg.textContent='Error: '+ex;}}"
 "async function pollBusy(name){"
 "for(var i=0;i<300;i++){await new Promise(function(rs){setTimeout(rs,2000);});"
 "try{var s=await fetch('/api/status');var j=await s.json();"
-"if(!j.busy){msg.className='ok';msg.textContent='Done: '+name+' — check the console.';return;}"
+"if(!j.busy){msg.className='ok';msg.textContent='Done: '+name+' — check the console.';return true;}"
 "msg.className='';msg.textContent='Installing '+name+'... (active: '+j.active+')';}"
-"catch(ex){return;}}}"
+"catch(ex){return false;}}"
+"return true;}"
+"async function waitBusy(){"
+"for(var i=0;i<30;i++){await new Promise(function(rs){setTimeout(rs,1000);});"
+"try{var s=await fetch('/api/status');var j=await s.json();if(j.busy)return true;}"
+"catch(ex){return false;}}"
+"return true;}"
+"async function waitIdle(){"
+"if(!(await waitBusy()))return false;"
+"for(var i=0;i<600;i++){await new Promise(function(rs){setTimeout(rs,2000);});"
+"try{var s=await fetch('/api/status');var j=await s.json();if(!j.busy)return true;}"
+"catch(ex){return false;}}"
+"return true;}"
+"async function installOne(g){"
+"try{var u='http://'+pcEl.value+':9898/pkg/'+encodeURIComponent(g.id);"
+"var q='/install?url='+encodeURIComponent(u)+'&name='+encodeURIComponent(g.title);"
+"if(g.hasIcon)q+='&icon='+encodeURIComponent('http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id));"
+"var r=await fetch(q);"
+"var t=await r.text();"
+"if(t.indexOf('ok:')!==0){msg.className='err';msg.textContent=t;return false;}"
+"return true;}catch(ex){msg.className='err';msg.textContent='Error: '+ex;return false;}}"
+"async function installAll(base){"
+"var q=[base].concat(famOf(base));"
+"var total=qTotal(q);"
+"var c='Install '+q.length+' packages? '+q.map(function(m,i){return (i+1)+'. '+m.title+' ('+m.role+')';}).join(', ');"
+"if(total>0)c+='\\nTotal size: '+fmtSize(total);"
+"if(freeBytes>=0&&total>0)c+=' — console free: '+fmtSize(freeBytes)+(total>freeBytes?' — NOT ENOUGH SPACE!':'');"
+"if(!confirm(c))return;"
+"var done=0;setBar(0,total);"
+"for(var i=0;i<q.length;i++){"
+"msg.className='';msg.textContent='Queue '+(i+1)+'/'+q.length+': '+q[i].title+'...'+(total>0?' ('+fmtSize(done)+' of '+fmtSize(total)+' done)':'');"
+"if(!(await installOne(q[i]))){setBar(done,total);return;}"
+"if(!(await waitIdle())){setBar(done,total);return;}"
+"done+=(q[i].size||0);setBar(done,total);}"
+"document.getElementById('qbar').style.display='none';"
+"msg.className='ok';msg.textContent='Done: '+base.title+' + '+(q.length-1)+' add-ons'+(total>0?' ('+fmtSize(total)+')':'')+' — check the console.';loadSpace();}"
 "async function copyImg(id,file,size){msg.textContent='Copying '+file+'...';"
 "var mode='overwrite';"
 "try{var st=await fetch('/api/files/stat?path='+encodeURIComponent('/data/homebrew/'+file));"
@@ -1088,50 +1200,91 @@ static const char UI_HTML[] =
 "body:JSON.stringify({url:'http://'+pcEl.value+':9898/pkg/'+id,path:'/data/homebrew/'+file,mode:mode})});"
 "var x=await r.text();"
 "if(x.indexOf('started')<0){msg.textContent=x;return;}"
+"copCancelled=false;copPaused=false;"
+"document.getElementById('copPause').textContent='Pause';"
+"document.getElementById('copctl').style.display='';"
 "var lastGot=0,lastT=Date.now();"
 "for(var i=0;i<1800;i++){await new Promise(function(rs){setTimeout(rs,2000);});"
 "try{var s=await fetch('/api/status');var j=await s.json();"
-"if(!j.pull){msg.textContent='Copy started — watch the console notifications.';return;}"
+"if(!j.pull){copHide();"
+"if(copCancelled){msg.className='';msg.textContent='Copy cancelled: '+file+' (partial stays for resume).';}"
+"else{msg.className='ok';msg.textContent='Done: '+file+' — check the console.';loadSpace();}"
+"return;}"
 "var now=Date.now(),spd='';"
 "if(now>lastT&&j.pullGot>=lastGot)spd=' • '+fmtSpd((j.pullGot-lastGot)*1000/(now-lastT));"
 "lastGot=j.pullGot;lastT=now;"
+"setBar(j.pullGot,j.pullWant);"
+"var pp=j.pullPaused?' (paused)':'';"
 "if(j.pullWant>0){var pc=Math.floor(j.pullGot*100/j.pullWant);"
-"msg.textContent='Copying '+file+': '+pc+'% ('+fmtSize(j.pullGot)+' / '+fmtSize(j.pullWant)+')'+spd;}"
-"else msg.textContent='Copying '+file+': '+fmtSize(j.pullGot)+spd;}"
+"msg.textContent='Copying '+file+': '+pc+'% ('+fmtSize(j.pullGot)+' / '+fmtSize(j.pullWant)+')'+spd+pp;}"
+"else msg.textContent='Copying '+file+': '+fmtSize(j.pullGot)+spd+pp;}"
 "catch(ex){msg.textContent='Copy started — watch the console notifications.';return;}}"
-"msg.textContent='Copy started — watch the console notifications.';}"
-"catch(ex){msg.textContent='Error: '+ex;}}"
+"copHide();msg.textContent='Copy started — watch the console notifications.';}"
+"catch(ex){copHide();msg.textContent='Error: '+ex;}}"
+"var copCancelled=false,copPaused=false;"
+"function copHide(){document.getElementById('copctl').style.display='none';document.getElementById('qbar').style.display='none';}"
+"async function copPauseToggle(){copPaused=!copPaused;"
+"try{await fetch('/api/pull/pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:copPaused?1:0})});}catch(ex){}"
+"document.getElementById('copPause').textContent=copPaused?'Resume':'Pause';}"
+"async function copCancel(){copCancelled=true;"
+"try{await fetch('/api/pull/cancel',{method:'POST'});}catch(ex){}}"
 "function imgIcon(f){if(f==='exfat')return '💽';if(f==='ffpkg'||f==='ffpfsc')return '🗜';return '📦';}"
 "function fmtColor(f){if(f==='exfat')return '#34B595';if(f==='ffpfsc')return '#CE9C40';if(f==='ffpkg')return '#A27AD8';return '#6498F0';}"
 "function famOf(g){var f=all.filter(function(m){return m.format==='pkg'&&!isBase(m)&&m.familyKey===g.familyKey;});"
 "f.sort(function(a,b){return rank(a.role)-rank(b.role);});return f;}"
-"function famPanel(g){var p=document.createElement('div');p.className='fampanel';"
-"var box=document.createElement('div');box.className='fambox';"
-"famOf(g).forEach(function(m){box.appendChild(card(m,1));});"
-"p.appendChild(box);return p;}"
-"function card(g,sub){var d=document.createElement('div');d.className=sub?'member':'card';"
-"var im=(!sub)?(g.hasIcon?'<img src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'<div class=big>🎮</div>'):'';"
+"function openModal(g){"
+"var box=document.getElementById('mbox');box.innerHTML='';"
+"var xx=document.createElement('button');xx.className='mx';xx.textContent='X';"
+"xx.onclick=closeModal;box.appendChild(xx);"
 "var meta=esc(g.titleId||'');if(g.version)meta+=' v'+esc(g.version);"
 "if(g.sizeText)meta+=' &middot; '+esc(g.sizeText);"
-"var badge=sub?'<span class=rb>'+esc(g.role)+'</span>':'';"
+"var h=document.createElement('h3');h.textContent=g.title;box.appendChild(h);"
+"var mm=document.createElement('div');mm.className='mm';mm.innerHTML=meta+' '+platBadge(g.platform);box.appendChild(mm);"
+"var fam=famOf(g);"
+"var ib=document.createElement('button');ib.className='go';ib.textContent='Install game';"
+"ib.onclick=function(){install(g.id,g.title,g.hasIcon);};box.appendChild(ib);"
+"if(fam.length){"
+"var ab=document.createElement('button');ab.className='go';ab.style.background='#34B595';"
+"ab.textContent='Install all ('+(fam.length+1)+' packages)';"
+"ab.onclick=function(){installAll(g);};box.appendChild(ab);"
+"var patches=fam.filter(function(m){return m.role==='Patch';});"
+"var dlcs=fam.filter(function(m){return m.role!=='Patch';});"
+"var fbox=document.createElement('div');fbox.className='fambox';"
+"function grp(t,arr){if(!arr.length)return;var hh=document.createElement('div');hh.className='famgrp';hh.textContent=t+' ('+arr.length+')';fbox.appendChild(hh);arr.forEach(function(m){fbox.appendChild(card(m,1));});}"
+"grp('Patches',patches);grp('DLC',dlcs);box.appendChild(fbox);}"
+"var cb=document.createElement('button');cb.className='mclose';cb.textContent='Close';"
+"cb.onclick=closeModal;box.appendChild(cb);"
+"document.getElementById('movl').style.display='';"
+"document.body.style.overflow='hidden';"
+"setTimeout(function(){var x=document.querySelector('#mbox .mx');if(x)x.focus();},50);}"
+"function closeModal(){document.getElementById('movl').style.display='none';document.body.style.overflow='';}"
+"function platBadge(p){if(p==='PS5')return '<span class=bdg style=\"background:#F1F3F8;color:#171717\">PS5</span>';if(p==='PS4')return '<span class=bdg style=\"background:#0070D1;color:#fff\">PS4</span>';return '';}"
+"function covCls(g){return g.platform==='PS4'?'cov4':'cov5';}"
+"function card(g,sub){var d=document.createElement('div');d.className=sub?'member':'card';"
+"var im=(!sub)?(g.hasIcon?'<img class=\"'+covCls(g)+'\" src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'<div class=\"cov '+covCls(g)+'\"><span>PKG</span></div>'):'';"
+"var meta=esc(g.titleId||'');if(g.version)meta+=' v'+esc(g.version);"
+"if(g.sizeText)meta+=' &middot; '+esc(g.sizeText);"
+"var badge=sub?(g.role==='Patch'?'<span class=rb style=\"background:#E17B7B\">Patch</span>':(g.role==='DLC'?'<span class=rb style=\"background:#E8A34C\">DLC</span>':'<span class=rb>'+esc(g.role)+'</span>')):'';"
 "if(sub){d.innerHTML='<div><div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div></div>';"
 "var w=document.createElement('div');w.innerHTML=badge;"
 "var b=document.createElement('button');b.textContent='Install';"
 "b.onclick=function(ev){ev.stopPropagation();install(g.id,g.title,g.hasIcon);};"
 "w.appendChild(b);d.appendChild(w);return d;}"
 "if(kind==='images'){"
-"var cov=g.hasIcon?'<img src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'<div class=big>'+imgIcon(g.format)+'</div>';"
+"var cov=g.hasIcon?'<img class=\"'+covCls(g)+'\" src=\"http://'+pcEl.value+':9898/icon/'+encodeURIComponent(g.id)+'\">':'<div class=\"cov '+covCls(g)+'\"><span>'+imgIcon(g.format)+'</span></div>';"
 "var fb='<span style=\"display:inline-block;background:'+fmtColor(g.format)+';color:#fff;font-size:15px;font-weight:bold;border-radius:4px;padding:3px 10px\">'+esc((g.format||'img').toUpperCase())+'</span>';"
 "d.innerHTML=cov+'<div class=t>'+esc(g.title)+'</div><div class=m>'+fb+' &middot; '+esc(g.sizeText||'')+'</div>';"
 "var cb=document.createElement('button');cb.textContent='Copy to homebrew';"
 "cb.onclick=function(ev){ev.stopPropagation();copyImg(g.id,g.file||g.title,g.size||0);};d.appendChild(cb);return d;}"
 "var fam=famOf(g);"
 "var cnt=fam.length?'<span class=fc>'+fam.length+' add-on'+(fam.length>1?'s':'')+'</span>':'';"
-"d.innerHTML=im+'<div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div>'+cnt;"
+"var pb=platBadge(g.platform);"
+"d.innerHTML=im+'<div class=t>'+esc(g.title)+'</div><div class=m>'+meta+'</div>'+(pb?'<div class=badges>'+pb+'</div>':'')+cnt;"
 "var ib=document.createElement('button');ib.textContent='Install';"
 "ib.onclick=function(ev){ev.stopPropagation();install(g.id,g.title,g.hasIcon);};d.appendChild(ib);"
-"if(openFam===g.familyKey&&fam.length)d.className+=' sel';"
-"d.onclick=function(){openFam=(openFam===g.familyKey)?null:g.familyKey;render();};"
+"d.onclick=function(){openModal(g);};"
+"d.tabIndex=0;"
+"d.onkeydown=function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();openModal(g);}};"
 "return d;}"
 "function render(){grid.innerHTML='';var list;"
 "if(kind==='images'){list=all.filter(function(g){return g.format!=='pkg'&&matchP(g)&&matchQ(g);});"
@@ -1143,8 +1296,9 @@ static const char UI_HTML[] =
 "bases.sort(function(a,b){return a.title.toLowerCase()<b.title.toLowerCase()?-1:1;});"
 "if(!bases.length){msg.textContent=all.length?'No match.':'Library is empty — tick Publish library in PKG Sender.';return;}"
 "msg.textContent=bases.length+' games';"
-"bases.forEach(function(g){grid.appendChild(card(g,0));"
-"if(openFam===g.familyKey&&famOf(g).length)grid.appendChild(famPanel(g));});}"
+"bases.forEach(function(g){grid.appendChild(card(g,0));});}"
+"document.getElementById('movl').onclick=function(ev){if(ev.target.id==='movl')closeModal();};"
+"document.addEventListener('keydown',function(ev){if(ev.key==='Escape')closeModal();});"
 "async function resolvePc(){"
 "try{var r=await fetch('/api/pc');var j=await r.json();"
 "if(j.pc&&j.age>=0&&j.age<15){pcEl.value=j.pc;pcstat.textContent='PC: '+j.pc+' (auto)';return j.pc;}}catch(e){}"
@@ -1152,10 +1306,10 @@ static const char UI_HTML[] =
 "if(m){pcEl.value=m;pcstat.textContent='PC: '+m+' (manual)';return m;}"
 "pcstat.textContent='PC: ?';return '';}"
 "async function load(){var pc=await resolvePc();"
-"if(!pc){msg.textContent='No PC found — tick Publish library in PKG Sender, or type the PC address.';return;}"
+"if(!pc){msg.textContent='No PC found — tick Publish library in PKG Sender, or type the PC address.';document.getElementById('pcrow').style.display='';return;}"
 "localStorage.setItem('pri_pc',pc);msg.textContent='Loading...';grid.innerHTML='';all=[];"
 "try{var r=await fetch('http://'+pc+':9898/catalog');"
-"all=await r.json();openFam=null;render();}"
+"all=await r.json();openFam=null;render();loadSpace();}"
 "catch(ex){msg.textContent='Error: '+ex+' — is Publish library on and the PC reachable?';}}"
 "function frow(e){var d=document.createElement('div');d.className='frow';"
 "var ic=e.dir?'📁':'📄';"
@@ -1214,6 +1368,7 @@ static const char UI_HTML[] =
 "catch(ex){fm.textContent='Error: '+ex;}}"
 "document.getElementById('save').onclick=load;"
 "document.getElementById('reload').onclick=load;"
+"document.getElementById('pcstat').onclick=function(){var r=document.getElementById('pcrow');r.style.display=(r.style.display==='none')?'':'none';};"
 "pcEl.onkeydown=function(ev){if(ev.key==='Enter')load();};"
 "document.getElementById('mkbtn').onclick=fsMkdir;"
 "document.getElementById('up').onclick=function(){var roots=['/data','/mnt/usb0','/mnt/usb1','/mnt/usb2','/mnt/usb3'];"
@@ -1912,8 +2067,21 @@ handle_client(int fd)
 		time_t now = time(NULL);
 		long age = g_pc_seen > 0 ? (long)(now - g_pc_seen) : -1;
 
-		snprintf(out, sizeof(out), "{\"pc\":\"%s\",\"age\":%ld}",
-		    g_pc_addr, age);
+	snprintf(out, sizeof(out), "{\"pc\":\"%s\",\"age\":%ld}",
+	    g_pc_addr, age);
+	send_json(fd, out);
+	} else if (!strcmp(method, "GET") &&
+	           !strncmp(path, "/api/space", 10)) {
+		char out[128];
+		struct statvfs sv;
+		long long bfree = -1, btotal = -1;
+
+		if (statvfs("/data", &sv) == 0) {
+			bfree = (long long)sv.f_bavail * sv.f_frsize;
+			btotal = (long long)sv.f_blocks * sv.f_frsize;
+		}
+		snprintf(out, sizeof(out), "{\"free\":%lld,\"total\":%lld}",
+		    bfree, btotal);
 		send_json(fd, out);
 #ifdef ENABLE_FILES_TAB
 	} else if (!strcmp(method, "GET") &&
@@ -2136,6 +2304,10 @@ handle_client(int fd)
 	} else if (!strncmp(path, "/api/fs/", 8)) {
 		send_text(fd, "error:file-explorer-disabled");
 #endif
+	} else if (!strcmp(method, "GET") &&
+	           (!strcmp(path, "/logo.png") ||
+	            !strcmp(path, "/favicon.ico"))) {
+		send_png(fd, sender_logo, sender_logo_size);
 	} else if (!strcmp(method, "GET")) {
 		send_html(fd, UI_HTML);
 	} else if (!strcmp(method, "POST") &&
