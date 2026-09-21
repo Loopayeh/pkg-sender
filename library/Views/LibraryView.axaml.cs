@@ -509,7 +509,7 @@ public partial class LibraryView : UserControl
             string ps4mode = "offline";
             if (!apiOk)
             {
-                // No receiver — but a PS4 (RPI/etaHEN/GoldHEN) also installs
+                // No receiver — but a PS4 (RPI/GoldHEN) also installs
                 // fine; detect it so the dot isn't red while pushes work.
                 ps4mode = await LoopDPI.Core.Ps4Installer.DetectAsync(ps);
             }
@@ -2049,7 +2049,7 @@ public partial class LibraryView : UserControl
             item.Message = "pushing…";
             _m.Status = $"Installing PKG: {item.Game.Title}";
         });
-        // PS4 first: RPI -> etaHEN -> GoldHEN (same setup as the DPI app).
+        // PS4 first: RPI -> GoldHEN (same setup as the DPI app).
         // PS4 detection is cheap; PS5 items skip it.
         if (item.Game.IsPs4 || (item.Game.Platform ?? "").StartsWith("PS4"))
         {
@@ -2071,15 +2071,10 @@ public partial class LibraryView : UserControl
                     {
                         var r => (r.Ok, "goldhen", r.Reply)
                     }
-                    : mode == "etahen"
-                        ? (await Ps4Installer.PushEtaHenAsync(_m.PsIp, pushUrl)) switch
-                        {
-                            var r => (r.Ok, "etahen", r.Reply)
-                        }
-                        : (await Ps4Installer.PushRpiAsync(_m.PsIp, pushUrl, item.Game.Title, iconUrl)) switch
-                        {
-                            var r => (r.Ok, "rpi", r.Reply)
-                        };
+                    : (await Ps4Installer.PushRpiAsync(_m.PsIp, pushUrl, item.Game.Title, iconUrl)) switch
+                    {
+                        var r => (r.Ok, "rpi", r.Reply)
+                    };
                 try
                 {
                     File.AppendAllText(

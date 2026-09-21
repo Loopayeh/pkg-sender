@@ -51,12 +51,11 @@ Select `.exfat` / `.ffpkg` / `.ffpfsc` rows and press **Copy images** — they l
 Jailbreak the PS4 and start **one** of these (the app auto-detects in this order):
 
 1. **Remote Package Installer (RPI)** — serves its API on port `12800`.
-2. **etaHEN** — DPIv2 API on port `12800`.
-3. **GoldHEN with Payload Server enabled** — ports `9090` / `9021` / `9020`.
+2. **GoldHEN with Payload Server enabled** — ports `9090` / `9021` / `9020`.
 
 ### 2. Connect and test
 
-Same network as the PC (see [LAN connection](#lan-connection)). In PKG Sender type the console IP and press **Test** — it reports which mode it found (`RPI`, `etaHEN`, or `GoldHEN`).
+Same network as the PC (see [LAN connection](#lan-connection)). In PKG Sender type the console IP and press **Test** — it reports which mode it found (`RPI` or `GoldHEN`).
 
 ### 3. Install a PKG game
 
@@ -64,7 +63,6 @@ Same network as the PC (see [LAN connection](#lan-connection)). In PKG Sender ty
 2. Tick **PS4 console** above the queue — PS4 installs go strictly one-by-one (a PS5 queues natively, a PS4 does not).
 3. What happens per mode:
    - **RPI**: the PC sends the file URL to `http://<ps4>:12800/api/install`; the PS4 downloads and installs it itself.
-   - **etaHEN**: direct multipart upload to the console.
    - **GoldHEN**: payload injection over the binloader ports, then install.
 
 No FTP is involved on either console — all transfers are plain HTTP from the PC's file server (port `9898`).

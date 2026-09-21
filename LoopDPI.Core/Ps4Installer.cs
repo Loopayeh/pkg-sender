@@ -12,9 +12,8 @@ namespace LoopDPI.Core;
 /// <summary>
 /// PS4 install paths, ported from marcussacana/DirectPackageInstaller:
 /// 1) Remote Package Installer API at 12800 (/api/install)
-/// 2) etaHEN DPIv2 API at 12800 (/upload multipart)
-/// 3) GoldHEN Payload Server at 9090 + bin injection on 9090/9021/9020.
-/// Auto-detect order: RPI -> etaHEN -> GoldHEN.
+/// 2) GoldHEN Payload Server at 9090 + bin injection on 9090/9021/9020.
+/// Auto-detect order: RPI -> GoldHEN.
 /// </summary>
 public static class Ps4Installer
 {
@@ -38,12 +37,6 @@ public static class Ps4Installer
     {
         string? body = await GetBodyAsync($"http://{ip}:12800/api");
         return body != null && body.Contains("Unsupported method") && body.Contains("fail");
-    }
-
-    public static async Task<bool> IsEtaHenOnlineAsync(string ip)
-    {
-        string? body = await GetBodyAsync($"http://{ip}:12800/");
-        return body != null && body.Contains("etaHEN");
     }
 
     public static async Task<bool> IsGoldHenOnlineAsync(string ip)
@@ -70,7 +63,6 @@ public static class Ps4Installer
     private static async Task<string> DetectUncachedAsync(string ip)
     {
         if (await IsRpiOnlineAsync(ip)) return "rpi";
-        if (await IsEtaHenOnlineAsync(ip)) return "etahen";
         if (await IsGoldHenOnlineAsync(ip)) return "goldhen";
         // raw binloader ports still count as goldhen-capable
         if (await CanConnectPayloadPortAsync(ip)) return "goldhen";
@@ -87,11 +79,6 @@ public static class Ps4Installer
             {
                 var (ok, reply) = await PushRpiAsync(psIp, fileUrl, pkg.Title);
                 return (ok, "rpi", reply);
-            }
-            case "etahen":
-            {
-                var (ok, reply) = await PushEtaHenAsync(psIp, fileUrl);
-                return (ok, "etahen", reply);
             }
             case "goldhen":
             {
@@ -146,23 +133,6 @@ public static class Ps4Installer
 
     private static string RpiEscape(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");
-
-    public static async Task<(bool Ok, string Reply)> PushEtaHenAsync(string psIp, string fileUrl)
-    {
-        try
-        {
-            string boundary = "------LoopDPI_" + Guid.NewGuid().ToString("N")[..16];
-            using var content = new MultipartFormDataContent(boundary);
-            content.Add(new StringContent("", Encoding.UTF8, "application/octet-stream"), "\"file\"", "\"\"");
-            content.Add(new StringContent(fileUrl, Encoding.UTF8), "\"url\"");
-            using var resp = await Http.PostAsync($"http://{psIp}:12800/upload", content);
-            string body = await resp.Content.ReadAsStringAsync();
-            if (body.Contains("0x80990085"))
-                body += "\nVerify free space on the console.";
-            return (body.Contains("SUCCESS:"), body);
-        }
-        catch (Exception ex) { return (false, ex.Message); }
-    }
 
     // ---- GoldHEN path: inject ps4_dpi_payload.bin, then send PKG info ----
 
