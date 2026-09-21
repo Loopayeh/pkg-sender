@@ -85,7 +85,7 @@ public static class Ps4Installer
         {
             case "rpi":
             {
-                var (ok, reply) = await PushRpiAsync(psIp, fileUrl);
+                var (ok, reply) = await PushRpiAsync(psIp, fileUrl, pkg.Title);
                 return (ok, "rpi", reply);
             }
             case "etahen":
@@ -120,12 +120,22 @@ public static class Ps4Installer
             + ",\"hashValue\":\"0000000000000000000000000000000000000000\"}]}";
     }
 
-    public static async Task<(bool Ok, string Reply)> PushRpiAsync(string psIp, string fileUrl)
+    public static async Task<(bool Ok, string Reply)> PushRpiAsync(string psIp, string fileUrl, string? name = null, string? iconUrl = null)
     {
         try
         {
             string enc = Uri.EscapeDataString(fileUrl.Replace("https://", "http://"));
-            string json = $"{{\"type\":\"direct\",\"packages\":[\"{enc}\"]}}";
+            // Same shape as ConsoleClient.PushAsync: our own receiver (which
+            // also answers the RPI probe) shows name/cover from these; a real
+            // RPI just ignores the extra fields.
+            var sb = new StringBuilder("{\"type\":\"direct\",\"packages\":[\"");
+            sb.Append(enc).Append("\"]");
+            if (!string.IsNullOrWhiteSpace(name))
+                sb.Append(",\"name\":\"").Append(RpiEscape(name)).Append('"');
+            if (!string.IsNullOrWhiteSpace(iconUrl))
+                sb.Append(",\"icon_url\":\"").Append(RpiEscape(iconUrl)).Append('"');
+            sb.Append('}');
+            string json = sb.ToString();
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var resp = await Http.PostAsync($"http://{psIp}:12800/api/install", content);
             string body = await resp.Content.ReadAsStringAsync();
@@ -133,6 +143,9 @@ public static class Ps4Installer
         }
         catch (Exception ex) { return (false, ex.Message); }
     }
+
+    private static string RpiEscape(string s) =>
+        s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");
 
     public static async Task<(bool Ok, string Reply)> PushEtaHenAsync(string psIp, string fileUrl)
     {

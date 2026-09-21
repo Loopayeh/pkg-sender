@@ -74,6 +74,15 @@ public static class ConsoleClient
             json = json[..^1] + $",\"icon_url\":\"{JsonEscape(iconUrl)}\"}}";
         }
         string? body = await PostAnyAsync(psIp, "/api/install", json);
+        try
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(
+                    System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData),
+                    "PkgSender", "push-debug.log"),
+                $"{System.DateTime.Now:yyyy-MM-dd HH:mm:ss} [push] ps={psIp} name={name} icon={iconUrl} url={url} reply={body}\n");
+        }
+        catch { }
         if (body == null)
             return (false, "no reply on 12800/9090");
         return (body.Contains("\"success\""), body);

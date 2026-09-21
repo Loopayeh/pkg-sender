@@ -242,10 +242,12 @@ public sealed class RangeFileServer : IDisposable
                 if (!_icons.TryGetValue(iconId, out var png) || png.Length == 0 ||
                     _revoked.ContainsKey(iconId))
                 {
+                    Log($"icon 404 ({iconId})");
                     await WriteRaw(ns, "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
                     return;
                 }
                 FileRequested?.Invoke(iconId);
+                Log($"icon 200 ({iconId}, {png.Length} bytes)");
                 await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: image/png\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {png.Length}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n", ct);
                 if (!isHead)
                 {

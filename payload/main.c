@@ -19,7 +19,7 @@
  *   POST /api/files/mkdir  {"path":..}    - mkdir -p under /data/homebrew
  *   POST /api/files/write?path=..&offset= - raw chunk append
  *   POST /api/files/done   {"path":..,"size":N} - verify + toast
- *   Files tab + /api/fs/* : TEMP-DISABLED (see ENABLE_FILES_TAB;
+ *   Files tab + /api/fs/... : TEMP-DISABLED (see ENABLE_FILES_TAB;
  *   backup: main.c.with-files-tab.bak)
  *   UDP beacon: "PKGSENDER v1" broadcast to 255.255.255.255:12801 every 3s
  *
@@ -64,7 +64,7 @@
 #define URL_MAX    2048
 #define PATH_MAX_V 1024
 
-/* File explorer (Files tab + /api/fs/*) is TEMPORARILY DISABLED.
+/* File explorer (Files tab + /api/fs/...) is TEMPORARILY DISABLED.
  * Full code is kept below behind ENABLE_FILES_TAB and the last
  * working copy is saved as main.c.with-files-tab.bak.
  * To re-enable: #define ENABLE_FILES_TAB 1 */
@@ -809,7 +809,24 @@ fs_copy_r(const char *src, const char *dst)
 	return 0;
 }
 
-/* escape " \ and C0 controls for JSON */
+typedef struct fs_entry {
+	char name[256];
+	int is_dir;
+	long long size;
+} fs_entry_t;
+
+static int
+fs_entry_cmp(const void *a, const void *b)
+{
+	const fs_entry_t *x = a, *y = b;
+
+	if (x->is_dir != y->is_dir)
+		return y->is_dir - x->is_dir; /* dirs first */
+	return strcmp(x->name, y->name);
+}
+#endif /* ENABLE_FILES_TAB */
+
+/* escape " \ and C0 controls for JSON (shared, always compiled) */
 static void
 json_escape(const char *src, char *dst, size_t dst_sz)
 {
@@ -830,23 +847,6 @@ json_escape(const char *src, char *dst, size_t dst_sz)
 	}
 	dst[o] = '\0';
 }
-
-typedef struct fs_entry {
-	char name[256];
-	int is_dir;
-	long long size;
-} fs_entry_t;
-
-static int
-fs_entry_cmp(const void *a, const void *b)
-{
-	const fs_entry_t *x = a, *y = b;
-
-	if (x->is_dir != y->is_dir)
-		return y->is_dir - x->is_dir; /* dirs first */
-	return strcmp(x->name, y->name);
-}
-#endif /* ENABLE_FILES_TAB */
 
 /* query key= -> decoded value (stops at & or space) */
 static int
@@ -1062,7 +1062,7 @@ static const char UI_HTML[] =
 "function matchP(g){if(plat==='all')return 1;return g.platform===plat;}"
 "async function install(id,name){msg.className='';msg.textContent='Installing '+name+'...';"
 "try{var u='http://'+pcEl.value+':9898/pkg/'+encodeURIComponent(id);"
-"var r=await fetch('/install?url='+encodeURIComponent(u));"
+"var r=await fetch('/install?url='+encodeURIComponent(u)+'&name='+encodeURIComponent(name));"
 "var t=await r.text();"
 "if(t.indexOf('ok:')===0){msg.className='ok';msg.textContent=t+' — watch the console notifications.';pollBusy(name);}"
 "else{msg.className='err';msg.textContent=t;}}catch(ex){msg.className='err';msg.textContent='Error: '+ex;}}"

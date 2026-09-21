@@ -26,18 +26,61 @@ public partial class LibraryView : UserControl
     // PKG. New files get globally-unique ids, so parallel queues never clash.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _registry = new();
     private RangeFileServer? _server;
-    private long _nextId;
-    // Session-unique url ids: the console caches icons by URL, and plain
-    // counters restart at 0 every launch — so last week's /icon/3 (game A)
-    // would be served from the console cache for this week's /icon/3
-    // (game B). Prefixing every id with a per-launch tag makes each push
-    // a fresh URL the console has never seen. Within one session the id
-    // per path stays stable (needed for Resume).
-    private readonly string _sessionTag = Guid.NewGuid().ToString("N")[..8];
-    // Stable url-id per local file within one session (session-tagged, see
-    // _sessionTag): re-pushing the same file reuses its URL, so the console
-    // RESUMES instead of starting over.
+    // Stable url-id per local file, ACROSS app restarts: hash of path+size.
+    // The old per-launch session tag orphaned every console-queued download
+    // (endless 404s) and killed all covers whenever the app restarted, and
+    // plain counters collide with the console's icon cache across launches.
+    // Same file -> same URL forever (console resumes, icons stay cached);
+    // changed file (new size) -> new URL (no stale bytes/icons).
+    // _pathIds stays stable within one session too (needed for Resume).
     private readonly Dictionary<string, string> _pathIds = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Stable url-id for a file (hash of path+size, hex, url-safe).</summary>
+    private static string StableId(string path, long size)
+    {
+        byte[] h = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(path.ToLowerInvariant() + "|" + size));
+        return "lib-" + Convert.ToHexString(h)[..16].ToLowerInvariant();
+    }
+
+    /// <summary>Id for a game, stable across restarts; rotates when the file changes.</summary>
+    private string IdFor(GameItem g)
+    {
+        lock (_runLock)
+        {
+            string want = StableId(g.Path, g.SizeBytes);
+            if (!_pathIds.TryGetValue(g.Path, out string? id) || id != want)
+                _pathIds[g.Path] = id = want;
+            return id;
+        }
+    }
+
+    /// <summary>Cover for cards/install queue: own icon, else the base game's
+    /// icon from the same family (patches/DLCs often bundle no icon at all).
+    /// Null when nobody in the family has one.</summary>
+    private byte[]? EffectiveIcon(GameItem g)
+    {
+        if (g.IconData is { Length: > 0 })
+            return g.IconData;
+        if (string.IsNullOrEmpty(g.FamilyKey))
+            return null;
+        GameItem[] snap;
+        lock (_runLock)
+        {
+            snap = _all.ToArray();
+        }
+        GameItem? best = null;
+        foreach (var m in snap)
+        {
+            if (m.IconData is not { Length: > 0 } || m.FamilyKey != g.FamilyKey || m.Path == g.Path)
+                continue;
+            if (m.Role == "Game")
+                return m.IconData;
+            best ??= m;
+        }
+        return best?.IconData;
+    }
+
     private readonly List<QueueItem> _runQueue = new();
     private readonly object _runLock = new();
     private bool _running;
@@ -1448,15 +1491,7 @@ public partial class LibraryView : UserControl
         _copyStop = false;
         foreach (var g in picked)
         {
-            string id;
-            lock (_runLock)
-            {
-                if (!_pathIds.TryGetValue(g.Path, out id!))
-                {
-                    id = "lib-" + _sessionTag + "-" + System.Threading.Interlocked.Increment(ref _nextId).ToString();
-                    _pathIds[g.Path] = id;
-                }
-            }
+            string id = IdFor(g);
             _registry[id] = g.Path;
             string url = _server!.UrlFor(_m.PcIp, id);
             string remote = "/data/homebrew/" + Path.GetFileName(g.Path);
@@ -1751,18 +1786,16 @@ public partial class LibraryView : UserControl
             {
                 if (g.IsFolder)
                     continue;
-                string id;
-                lock (_runLock)
-                {
-                    if (!_pathIds.TryGetValue(g.Path, out id!))
-                    {
-                        id = "lib-" + _sessionTag + "-" + System.Threading.Interlocked.Increment(ref _nextId).ToString();
-                        _pathIds[g.Path] = id;
-                    }
-                }
+                string id = IdFor(g);
                 _registry[id] = g.Path;
+                // A fresh catalog fetch (console Refresh) means fresh intent
+                // to serve: heal ids stuck revoked by an old cancel/pause,
+                // which otherwise 404 both /pkg and /icon forever on web installs.
+                _server?.Unrevoke(id);
                 bool hasIcon = false;
-                if (g.IconData is { Length: > 0 } icon)
+                // Patches/DLCs often bundle no icon: fall back to the base
+                // game's cover so every web card has one.
+                if (EffectiveIcon(g) is { Length: > 0 } icon)
                 {
                     _server?.RegisterIcon(id, icon);
                     hasIcon = true;
@@ -1911,14 +1944,9 @@ public partial class LibraryView : UserControl
     /// <summary>Register + push a single PKG; download is tracked by MonitorTick.</summary>
     private async Task PushOneAsync(QueueItem item)
     {
-        string id;
+        string id = IdFor(item.Game);
         lock (_runLock)
         {
-            if (!_pathIds.TryGetValue(item.Game.Path, out id!))
-            {
-                id = _sessionTag + "-" + System.Threading.Interlocked.Increment(ref _nextId).ToString();
-                _pathIds[item.Game.Path] = id;
-            }
             // Fresh (re)push of an idle url: un-revoke (undo Stop) and zero
             // its counter so progress starts clean. If another active row
             // shares the url, keep its running counter.
@@ -1929,8 +1957,9 @@ public partial class LibraryView : UserControl
         _server!.Unrevoke(id);
         string url = _server!.UrlFor(_m.PcIp, id);
         // Cover PNG for the console installer UI (LoopDPI shows icon_url).
+        // Patches/DLCs often bundle no icon: use the family's base cover.
         string? iconUrl = null;
-        if (item.Game.IconData is { Length: > 0 } icon)
+        if (EffectiveIcon(item.Game) is { Length: > 0 } icon)
         {
             _server!.RegisterIcon(id, icon);
             iconUrl = _server!.IconUrlFor(_m.PcIp, id);
@@ -1968,7 +1997,7 @@ public partial class LibraryView : UserControl
                         {
                             var r => (r.Ok, "etahen", r.Reply)
                         }
-                        : (await Ps4Installer.PushRpiAsync(_m.PsIp, pushUrl)) switch
+                        : (await Ps4Installer.PushRpiAsync(_m.PsIp, pushUrl, item.Game.Title, iconUrl)) switch
                         {
                             var r => (r.Ok, "rpi", r.Reply)
                         };
