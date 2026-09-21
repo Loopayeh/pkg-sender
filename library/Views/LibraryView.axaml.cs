@@ -2651,12 +2651,11 @@ public partial class LibraryView : UserControl
                 _m.Status = $"Update available: {info.Tag}";
                 this.FindControl<Button>("BtnUpdate").Content = "⬆ Update available";
             });
-            if (manual)
-            {
-                var owner = Top as Window;
-                if (owner != null)
-                    await new UpdateDialog(info).ShowDialog(owner);
-            }
+            // Pop the updater dialog both on manual check and on the
+            // automatic startup check — otherwise nobody notices.
+            var owner = Top as Window;
+            if (owner != null)
+                await new UpdateDialog(info).ShowDialog(owner);
         }
         else if (manual)
         {

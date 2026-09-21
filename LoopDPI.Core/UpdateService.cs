@@ -16,7 +16,7 @@ namespace LoopDPI.Core;
 /// </summary>
 public static class UpdateService
 {
-    public const string AppVersion = "v1.1.3";
+    public const string AppVersion = "v1.2.7";
     public const string UpdateRepo = "Loopayeh/pkg-sender";
 
     public sealed record Asset(string Name, string Url, long Size);
