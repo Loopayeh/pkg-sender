@@ -1,5 +1,5 @@
 ; PKG Sender installer — per-user, no admin needed. Mirrors pkg-viewer/installer.iss.
-#define AppVer "1.2.6"
+#define AppVer "1.2.7"
 
 [Setup]
 AppName=PKG Sender
