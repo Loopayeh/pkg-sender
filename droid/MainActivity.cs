@@ -11,7 +11,7 @@ using LoopDPI.Core;
 
 namespace PkgSender.Droid;
 
-[Activity(Label = "PKG Sender", MainLauncher = true, Exported = true)]
+[Activity(Label = "PKG Sender • by Loopayeh", MainLauncher = true, Exported = true)]
 public sealed class MainActivity : Activity
 {
     const int PickReq = 1001;
@@ -31,8 +31,6 @@ public sealed class MainActivity : Activity
         var lay = new LinearLayout(this) { Orientation = Orientation.Vertical };
         int pad = (int)(16 * Resources!.DisplayMetrics!.Density);
         lay.SetPadding(pad, pad, pad, pad);
-
-        lay.AddView(new TextView(this) { Text = "PKG Sender (Android v1)" });
 
         _psIp = new EditText(this) { Hint = "Console IP, e.g. 192.168.1.105" };
         string? saved = GetPreferences(FileCreationMode.Private).GetString("psip", null);
