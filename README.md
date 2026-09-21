@@ -218,6 +218,10 @@ Published endpoints on the PC file server (`:9898`, CORS-open):
 
 ![PKG Sender compact view](docs/screenshot-compact.png)
 
+![Sending ASTRO BOT to PS5](docs/screenshot-sending.png)
+
+![Console browser — Images view](docs/screenshot-console-images.png)
+
 ## Support
 
 If you enjoy what I build and want to support my work, you can donate — every bit means a lot. 💙
