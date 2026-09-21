@@ -19,6 +19,16 @@ On first launch the About window opens (support links live there).
 
 ---
 
+## Screenshots
+
+![PKG Sender compact view](docs/screenshot-compact.png)
+
+![Sending ASTRO BOT to PS5](docs/screenshot-sending.png)
+
+![Console browser — Images view](docs/screenshot-console-images.png)
+
+---
+
 ## Tutorial — PS5
 
 ### 1. Start the receiver on the console
@@ -211,16 +221,6 @@ Published endpoints on the PC file server (`:9898`, CORS-open):
 - [seregonwar/zftpd](https://github.com/seregonwar/zftpd) (MIT) — pointed at
   PS5 TCP socket-buffer tuning as the fix for slow bulk transfers; our
   pull-downloader buffering was rewritten from scratch, no code copied.
-
-## Screenshots
-
-![PKG Sender main view](docs/screenshot-main.png)
-
-![PKG Sender compact view](docs/screenshot-compact.png)
-
-![Sending ASTRO BOT to PS5](docs/screenshot-sending.png)
-
-![Console browser — Images view](docs/screenshot-console-images.png)
 
 ## Support
 
