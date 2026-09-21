@@ -944,8 +944,9 @@ public partial class LibraryView : UserControl
         { ".pkg", ".exfat", ".ffpfsc", ".ffpkg" };
 
     /// <summary>
-    /// Drag & drop: folders become scan roots; loose game files pull in
-    /// their parent folder (merge scan, so the screen never resets).
+    /// Drag &amp; drop: loose .pkg files go STRAIGHT to the install queue
+    /// (parsed + enqueued, never added to the library or scan roots).
+    /// Folders still become library scan roots as before.
     /// </summary>
     private async Task DropAsync(DragEventArgs e)
     {
@@ -953,7 +954,7 @@ public partial class LibraryView : UserControl
         if (files == null || files.Count == 0)
             return;
         var added = new List<string>();
-        int loose = 0;
+        var loosePkgs = new List<string>();
         foreach (var f in files)
         {
             string p = f.Path.LocalPath;
@@ -965,16 +966,9 @@ public partial class LibraryView : UserControl
                     added.Add(p);
                 }
             }
-            else if (File.Exists(p) && DropExts.Contains(Path.GetExtension(p)))
+            else if (File.Exists(p) && Path.GetExtension(p).Equals(".pkg", StringComparison.OrdinalIgnoreCase))
             {
-                string? dir = Path.GetDirectoryName(p);
-                if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir) &&
-                    !_roots.Contains(dir, StringComparer.OrdinalIgnoreCase))
-                {
-                    _roots.Add(dir);
-                    added.Add(dir);
-                }
-                loose++;
+                loosePkgs.Add(p);
             }
         }
         if (added.Count > 0)
@@ -982,14 +976,76 @@ public partial class LibraryView : UserControl
             LibraryScanner.SaveRoots(_roots);
             await ScanAsync(added, merge: true);
         }
-        else if (loose > 0)
+        if (loosePkgs.Count > 0)
         {
-            _m.Status = "Dropped files are already in the library.";
+            _m.Status = $"Reading {loosePkgs.Count} dropped PKG(s)…";
+            var items = await Task.Run(() =>
+            {
+                var list = new List<GameItem>();
+                foreach (var p in loosePkgs)
+                {
+                    try
+                    {
+                        var info = LoopDPI.Core.GameReader.Read(p);
+                        if (info == null)
+                            continue;
+                        list.Add(ToGameItem(p, info));
+                    }
+                    catch
+                    {
+                    }
+                }
+                return list;
+            });
+            if (items.Count > 0)
+                EnqueueGames(items);
+            else
+                _m.Status = "Could not read the dropped PKG(s).";
         }
-        else
+        else if (added.Count == 0)
         {
-            _m.Status = "Drop game folders or .pkg/.exfat/.ffpkg/.ffpfsc files.";
+            _m.Status = "Drop .pkg files (they go straight to the queue) or game folders.";
         }
+    }
+
+    /// <summary>Build a queue-ready GameItem from a parsed file (shared with library merge).</summary>
+    private GameItem ToGameItem(string path, LoopDPI.Core.PkgInfo info)
+    {
+        string gid = !string.IsNullOrWhiteSpace(info.TitleId) ? info.TitleId : info.ContentId;
+        string gver = string.IsNullOrWhiteSpace(info.Version) ? "" : " • v" + info.Version.TrimStart('v', 'V');
+        string fmt = string.IsNullOrEmpty(info.Format) ? "pkg" : info.Format;
+        string role = fmt != "pkg" ? "Image"
+            : info.IsDlc ? "DLC"
+            : info.ContentType.Equals("gp", StringComparison.OrdinalIgnoreCase) ? "Patch"
+            : "Game";
+        string meta = gid + gver + (role == "Game" ? "" : " • " + role);
+        return new GameItem
+        {
+            Path = path,
+            Title = string.IsNullOrWhiteSpace(info.Title) ? Path.GetFileName(path) : info.Title,
+            Meta = meta,
+            SizeText = Program.FormatSize(info.PackageSize),
+            SizeBytes = info.PackageSize,
+            Platform = info.Format == "pkg"
+                ? (string.IsNullOrWhiteSpace(info.Platform) ? "PKG" : info.Platform)
+                : $"{(string.IsNullOrWhiteSpace(info.Platform) ? "PS5" : info.Platform)} • {info.Format}",
+            Format = fmt,
+            FormatLabel = fmt.ToUpperInvariant(),
+            IsFolder = info.IsFolder,
+            ContentId = info.ContentId,
+            TitleId = info.TitleId ?? "",
+            Version = (info.Version ?? "").TrimStart('v', 'V'),
+            Cover = info.Cover,
+            HasCover = info.Cover != null,
+            IconData = info.IconData,
+            IsPs5 = (info.Platform ?? "").StartsWith("PS5"),
+            IsPs4 = (info.Platform ?? "").StartsWith("PS4"),
+            IsDlc = info.IsDlc,
+            FamilyKey = FamilyKeyOf(info, path),
+            Role = role,
+            CardRadius = new CornerRadius(2),
+            ImageRadius = new CornerRadius((info.Platform ?? "").StartsWith("PS5") ? 16 : 2),
+        };
     }
 
     /// <summary>
@@ -2049,38 +2105,34 @@ public partial class LibraryView : UserControl
             item.Message = "pushing…";
             _m.Status = $"Installing PKG: {item.Game.Title}";
         });
-        // PS4 first: RPI -> GoldHEN (same setup as the DPI app).
-        // PS4 detection is cheap; PS5 items skip it.
+        // PS4: trust the IP like DPI does — no detect gate. RPI post
+        // first (cheap, raw PKG URL), GoldHEN inject as fallback with the
+        // JSON manifest URL in the struct (DPI RegisterJSON protocol:
+        // payload fetches the manifest, BGFT downloads pieces[]).
         if (item.Game.IsPs4 || (item.Game.Platform ?? "").StartsWith("PS4"))
         {
-            string mode = await Ps4Installer.DetectAsync(_m.PsIp);
-            if (mode != "offline")
+            Post(() => { item.Message = "pushing via PS4…"; });
+            PkgInfo pkg = BuildPkgInfo(item.Game);
+            string method4 = "rpi";
+            bool ok4;
+            string reply4;
+            (ok4, reply4) = await Ps4Installer.PushRpiAsync(_m.PsIp, url, item.Game.Title, iconUrl);
+            if (!ok4)
             {
-                Post(() => { item.Message = $"pushing via PS4 {mode}…"; });
-                PkgInfo pkg = BuildPkgInfo(item.Game);
-                // GoldHEN needs a JSON manifest URL (like DPI's /json/{id}.json),
-                // not the raw file URL — raw gives BGFT 0x80990033.
-                string pushUrl = url;
-                if (mode == "goldhen")
-                {
-                    _server!.RegisterManifest(id, Ps4Installer.BuildManifest(url, pkg.PackageSize));
-                    pushUrl = _server!.ManifestUrlFor(_m.PcIp, id);
-                }
-                var (ok4, method4, reply4) = mode == "goldhen"
-                    ? (await Ps4Installer.PushGoldHenAsync(_m.PsIp, _m.PcIp, pushUrl, pkg, _server!.Port)) switch
-                    {
-                        var r => (r.Ok, "goldhen", r.Reply)
-                    }
-                    : (await Ps4Installer.PushRpiAsync(_m.PsIp, pushUrl, item.Game.Title, iconUrl)) switch
-                    {
-                        var r => (r.Ok, "rpi", r.Reply)
-                    };
+                Post(() => { item.Message = "RPI silent — trying GoldHEN…"; });
+                _server!.RegisterManifest(id, Ps4Installer.BuildManifest(url, pkg.PackageSize, pkg.Digest));
+                string manifestUrl = _server!.ManifestUrlFor(_m.PcIp, id);
+                var g = await Ps4Installer.PushGoldHenAsync(_m.PsIp, _m.PcIp, manifestUrl, pkg, _server!.Port);
+                ok4 = g.Ok;
+                reply4 = g.Reply;
+                method4 = "goldhen";
+            }
                 try
                 {
                     File.AppendAllText(
                         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                             "PkgSender", "push-debug.log"),
-                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{method4}] ok={ok4} url={pushUrl} reply={reply4}\n");
+                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{method4}] ok={ok4} url={url} reply={reply4}\n");
                 }
                 catch { }
                 lock (_runLock)
@@ -2108,7 +2160,6 @@ public partial class LibraryView : UserControl
                 });
                 return;
             }
-        }
         var (ok, reply) = await ConsoleClient.PushAsync(_m.PsIp, url, item.Game.Title, iconUrl);
         lock (_runLock)
         {

@@ -22,6 +22,9 @@ public sealed class PkgInfo
     public long PackageSize { get; init; }
     public string Format { get; init; } = "pkg";
     public bool IsFolder { get; init; }
+    /// <summary>PKG header digest (32 bytes at CNT+0xFE0, uppercase hex),
+    /// like DPI's PKGInfo.Digest — BGFT manifest needs the real one.</summary>
+    public string Digest { get; init; } = "";
     public byte[]? IconData { get; init; }
     public List<PkgParam> Params { get; init; } = new();
 
@@ -125,6 +128,7 @@ public static class PkgReader
             Platform = "PS4",
             Description = $"[PS4] {title}",
             PackageSize = input.Length,
+            Digest = cnt.Digest,
             IconData = icon,
             Params = pars,
         };
@@ -221,6 +225,8 @@ public static class PkgReader
         public bool IsDebug;
         public bool IsMeta;
         public string ContentId = "";
+        /// <summary>Uppercase-hex header digest (CNT+0xFE0, 32 bytes).</summary>
+        public string Digest = "";
         public List<(uint Id, string Name, uint Flags, uint DataOff, uint DataSize)> Entries = new();
         private readonly Stream _input;
 
@@ -310,6 +316,7 @@ public static class PkgReader
                     IsDebug = isDebug,
                     IsMeta = isMeta,
                     ContentId = ReadAscii(hdr, 0x40, 0x30),
+                    Digest = ReadDigest(input, cntBase),
                 };
                 foreach (var e in raw)
                     img.Entries.Add((e.Id, names.TryGetValue(e.NameOff, out var n) ? n : "", e.Flags, e.DataOff, e.DataSize));
@@ -475,6 +482,25 @@ public static class PkgReader
         for (int i = 7; i >= 0; i--)
             v = (v << 8) | s[i];
         return v;
+    }
+
+    /// <summary>PKG header digest: 32 bytes at CNT+0xFE0, uppercase hex (DPI: HeaderDigest).</summary>
+    private static string ReadDigest(Stream input, long cntBase)
+    {
+        try
+        {
+            if (cntBase + 0xFE0 + 32 > input.Length)
+                return "";
+            byte[] d = new byte[32];
+            input.Position = cntBase + 0xFE0;
+            if (input.Read(d, 0, 32) != 32)
+                return "";
+            return Convert.ToHexString(d);
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     private static string ReadAscii(byte[] b, int o, int n)

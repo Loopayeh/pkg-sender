@@ -91,15 +91,18 @@ public static class Ps4Installer
     }
 
     /// <summary>
-    /// GoldHEN manifest JSON (same shape as DPI's RegisterJSON, single piece).
-    /// The PS4-side payload fetches this and feeds pieces[] to BGFT —
-    /// a raw PKG URL is NOT enough (BGFT 0x80990033).
+    /// GoldHEN manifest JSON (DPI RegisterJSON shape, single piece).
+    /// The PS4-side payload fetches this manifest and feeds pieces[] to
+    /// BGFT — the struct URL must be this manifest, never the raw PKG
+    /// (raw gives BGFT 0x80990033). packageDigest is the real PKG header
+    /// digest (CNT+0xFE0), like DPI's PKGInfo.Digest.
     /// </summary>
-    public static string BuildManifest(string fileUrl, long fileSize)
+    public static string BuildManifest(string fileUrl, long fileSize, string digest = "")
     {
         string eu = fileUrl.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        string dg = (digest ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
         return "{\"originalFileSize\":" + fileSize
-            + ",\"packageDigest\":\"\""
+            + ",\"packageDigest\":\"" + dg + "\""
             + ",\"numberOfSplitFiles\":1"
             + ",\"pieces\":[{\"url\":\"" + eu + "\""
             + ",\"fileOffset\":0"
@@ -194,7 +197,8 @@ public static class Ps4Installer
 
     /// <summary>
     /// GoldHEN install: local callback listener + payload inject + PKG info struct.
-    /// fileUrl must already be the PC file-server URL (RangeFileServer.UrlFor).
+    /// fileUrl is the JSON manifest URL (RangeFileServer.ManifestUrlFor) —
+    /// DPI protocol: the payload fetches the manifest, BGFT takes pieces[].
     /// DPI rule: ONE inject per push, never more. The binloader drops
     /// connections often, so connecting+sending is retried — but once the
     /// bytes are on the wire we wait for the callback exactly once. A second

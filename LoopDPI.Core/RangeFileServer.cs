@@ -138,8 +138,8 @@ public sealed class RangeFileServer : IDisposable
         // line rate instead of a few MB/s (same class of fix as zftpd's).
         try
         {
-            cl.SendBufferSize = 1024 * 1024;
-            cl.NoDelay = true;
+            cl.SendBufferSize = 4 * 1024 * 1024;
+            cl.NoDelay = false;
         }
         catch
         {
@@ -175,7 +175,7 @@ public sealed class RangeFileServer : IDisposable
             string rawTarget = reqParts.Length > 1 ? reqParts[1] : "";
             if (method != "GET" && method != "HEAD")
             {
-                await WriteRaw(ns, "HTTP/1.0 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", ct);
+                await WriteRaw(ns, "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", ct);
                 return;
             }
             bool isHead = method == "HEAD";
@@ -222,7 +222,7 @@ public sealed class RangeFileServer : IDisposable
                 {
                 }
                 var jb = Encoding.UTF8.GetBytes(json);
-                await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {jb.Length}\r\nConnection: close\r\n\r\n", ct);
+                await WriteRaw(ns, $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {jb.Length}\r\nConnection: close\r\n\r\n", ct);
                 if (!isHead)
                 {
                     try
@@ -243,12 +243,12 @@ public sealed class RangeFileServer : IDisposable
                     _revoked.ContainsKey(iconId))
                 {
                     Log($"icon 404 ({iconId})");
-                    await WriteRaw(ns, "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
+                    await WriteRaw(ns, "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
                     return;
                 }
                 FileRequested?.Invoke(iconId);
                 Log($"icon 200 ({iconId}, {png.Length} bytes)");
-                await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: image/png\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {png.Length}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n", ct);
+                await WriteRaw(ns, $"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {png.Length}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n", ct);
                 if (!isHead)
                 {
                     try
@@ -269,7 +269,7 @@ public sealed class RangeFileServer : IDisposable
                 if (_manifests.TryGetValue(mid, out var mjson) && mjson.Length > 0)
                 {
                     Log("manifest 200");
-                    await WriteRaw(ns, $"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nContent-Length: {mjson.Length}\r\nConnection: close\r\n\r\n", ct);
+                    await WriteRaw(ns, $"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {mjson.Length}\r\nConnection: close\r\n\r\n", ct);
                     if (!isHead)
                     {
                         try { await ns.WriteAsync(mjson, ct); } catch { }
@@ -277,7 +277,7 @@ public sealed class RangeFileServer : IDisposable
                     return;
                 }
                 Log("manifest 404");
-                await WriteRaw(ns, "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
+                await WriteRaw(ns, "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
                 return;
             }
             string id = "pkg";
@@ -286,7 +286,7 @@ public sealed class RangeFileServer : IDisposable
             else if (!noQuery.Equals("/pkg", StringComparison.OrdinalIgnoreCase))
             {
                 Log("404");
-                await WriteRaw(ns, "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
+                await WriteRaw(ns, "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
                 return;
             }
 
@@ -294,7 +294,7 @@ public sealed class RangeFileServer : IDisposable
                 _revoked.ContainsKey(id))
             {
                 Log("pkg 404");
-                await WriteRaw(ns, "HTTP/1.0 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
+                await WriteRaw(ns, "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
                 return;
             }
             FileRequested?.Invoke(id);
@@ -357,14 +357,14 @@ public sealed class RangeFileServer : IDisposable
 
             if (unsatisfiable)
             {
-                await WriteRaw(ns, $"HTTP/1.0 416 Range Not Satisfiable\r\nContent-Range: bytes */{size}\r\nContent-Length: 0\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n", ct);
+                await WriteRaw(ns, $"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{size}\r\nContent-Length: 0\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n", ct);
                 return;
             }
 
             long length = end - start + 1;
             Log(partial ? "pkg 206" : "pkg 200");
             var h = new StringBuilder();
-            h.Append(partial ? "HTTP/1.0 206 Partial Content\r\n" : "HTTP/1.0 200 OK\r\n");
+            h.Append(partial ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
             if (partial)
                 h.Append($"Content-Range: bytes {start}-{end}/{size}\r\n");
             h.Append("Content-Type: application/octet-stream\r\n");
@@ -377,9 +377,9 @@ public sealed class RangeFileServer : IDisposable
 
             try
             {
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4 * 1024 * 1024, FileOptions.SequentialScan);
                 fs.Seek(start, SeekOrigin.Begin);
-                var buf = new byte[1024 * 1024];
+                var buf = new byte[4 * 1024 * 1024];
                 while (length > 0 && !ct.IsCancellationRequested)
                 {
                     int want = (int)Math.Min(buf.Length, length);
