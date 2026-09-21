@@ -1084,7 +1084,7 @@ static const char UI_HTML[] =
 "<div id=tools><input id=q placeholder='Search title or ID...'>"
 "<div id=chips><button data-p=all class=on>All</button><button data-p=PS5>PS5</button><button data-p=PS4>PS4</button></div></div>"
 "<div id=kind><button data-k=games class=on>Games</button><button data-k=images>Images</button></div>"
-"<div id=grid></div><div id=msg></div><div id=qbar><div id=qfill></div></div><div id=copctl style='display:none'><button class=gh id=copPause>Pause</button><button class=danger id=copCancel>Cancel copy</button></div></div>"
+"<div id=msg></div><div id=qbar><div id=qfill></div></div><div id=copctl style='display:none'><button class=gh id=copPause>Pause</button><button class=danger id=copCancel>Cancel copy</button></div><div id=grid></div></div>"
 "<div id=files style='display:none'>"
 "<div id=usbrow><button class=gh data-u='/data'>Data</button>"
 "<button class=gh data-u='/mnt/usb0'>USB0</button>"

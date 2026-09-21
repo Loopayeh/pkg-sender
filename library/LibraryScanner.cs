@@ -17,7 +17,7 @@ public static class LibraryScanner
     private sealed record CachedGame(long Size, long Mtime, string Title, string ContentId, string TitleId, string Platform, string Description, string IconB64, string Format, bool IsFolder, string Version, string ContentType, bool IsDlc);
     private sealed record CacheFile(List<string> Roots, Dictionary<string, CachedGame> Games, int Version);
 
-    private const int CacheVersion = 6; // bump when parsing changes (icons/formats)
+    private const int CacheVersion = 7; // bump when parsing changes (icons/formats)
 
     public static List<string> LoadRoots()
     {
