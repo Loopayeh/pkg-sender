@@ -603,10 +603,21 @@ public partial class LibraryView : UserControl
     /// </summary>
     private void RemoveRow(QueueItem row)
     {
-        // Dropping a paused copy row must unpause the receiver, or its
-        // worker would sleep forever with pull marked active.
-        if (row.State == "copying" && row.IsPaused)
-            _ = LoopDPI.Core.ConsoleClient.PullPauseAsync(_m.PsIp, false);
+        // Copy rows live on the receiver: only /api/pull/cancel actually
+        // stops the bytes. Dropping the row alone left the console
+        // downloading with nobody watching. (Cancel also unpauses.)
+        if (row.State == "copying")
+        {
+            _copyStop = true;
+            _ = LoopDPI.Core.ConsoleClient.PullCancelAsync(_m.PsIp);
+            Post(() =>
+            {
+                _m.Queue.Remove(row);
+                UpdateQueueLabel();
+                _m.Status = "Copy cancelled on the console — partial kept, Copy again to resume.";
+            });
+            return;
+        }
         string? revokeId = null;
         bool wasPending;
         lock (_runLock)
