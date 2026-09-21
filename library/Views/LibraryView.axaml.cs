@@ -213,7 +213,6 @@ public partial class LibraryView : UserControl
         this.FindControl<Button>("BtnAddDrive").Click += async (_, _) => await AddDriveAsync();
         this.FindControl<Button>("BtnTest").Click += async (_, _) => await TestConnectionAsync();
         this.FindControl<Button>("BtnScan").Click += async (_, _) => await ScanFoldersAsync();
-        this.FindControl<Button>("BtnClearCache").Click += async (_, _) => await ClearCacheAsync();
         this.FindControl<Button>("BtnSend").Click += (_, _) => EnqueuePkgs();
         this.FindControl<Button>("BtnCopy").Click += async (_, _) => await CopyImagesAsync();
         this.FindControl<Button>("BtnAbout").Click += async (_, _) =>
@@ -297,14 +296,8 @@ public partial class LibraryView : UserControl
         this.FindControl<ListBox>("GamesList").AddHandler(Button.ClickEvent, OnCardLinkClick);
         // Per-row Resume buttons live inside the queue DataTemplate.
         this.FindControl<ListBox>("QueueList").AddHandler(Button.ClickEvent, OnQueueButtonClick);
-        // Instant library from cache (no rescan); Scan refreshes.
-        if (_roots.Count == 0)
-            _m.Status = "Add a folder or drives first.";
-        else
-        {
-            _m.Status = "Loading library from cache…";
-            LoadCacheAtStartup();
-        }
+        // No auto-scan at startup: the user presses Scan when ready.
+        _m.Status = _roots.Count == 0 ? "Add a folder or drives first." : "Press Scan to load the library.";
     }
 
     private static string AddrOf(string? item)
@@ -986,40 +979,6 @@ public partial class LibraryView : UserControl
         {
             _m.Status = "Drop game folders or .pkg/.exfat/.ffpkg/.ffpfsc files.";
         }
-    }
-
-    /// <summary>
-    /// Clear cache button: forget saved game info, rescan folders fresh.
-    /// Roots are kept — only the parsed game data is dropped.
-    /// </summary>
-    private async Task ClearCacheAsync()
-    {
-        if (_m.IsBusy)
-            return;
-        LibraryScanner.ClearGameCache();
-        _m.Status = "Cache cleared — rescanning…";
-        await ScanFoldersAsync();
-    }
-
-    /// <summary>
-    /// Instant library at startup: show cached games immediately (stat
-    /// checks only), no rescan. Runs once; never clobbers a live scan.
-    /// </summary>
-    private void LoadCacheAtStartup()
-    {
-        if (_roots.Count == 0)
-            return;
-        _ = Task.Run(() =>
-        {
-            var cached = LibraryScanner.LoadCachedScans();
-            Post(() =>
-            {
-                if (cached.Count == 0 || _all.Count > 0 || _m.IsBusy)
-                    return;
-                FillList(cached, merge: false);
-                _m.Status = $"{_all.Count} games from cache — press Scan to refresh.";
-            });
-        });
     }
 
     /// <summary>

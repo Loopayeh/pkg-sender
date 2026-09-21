@@ -72,7 +72,32 @@ public static class LibraryScanner
         try
         {
             if (cache.TryGetValue(key, out var c) && c.Size == size && c.Mtime == mtime)
-                return Restore(c, size > 0 ? size : EstimateSize(key));
+            {
+                byte[]? icon = null;
+                try
+                {
+                    if (!string.IsNullOrEmpty(c.IconB64))
+                        icon = Convert.FromBase64String(c.IconB64);
+                }
+                catch
+                {
+                }
+                return new PkgInfo
+                {
+                    Title = c.Title,
+                    ContentId = c.ContentId,
+                    TitleId = c.TitleId,
+                    Platform = c.Platform,
+                    Description = c.Description,
+                    PackageSize = size > 0 ? size : EstimateSize(key),
+                    Format = string.IsNullOrEmpty(c.Format) ? "pkg" : c.Format,
+                    IsFolder = c.IsFolder,
+                    IconData = icon,
+                    Version = c.Version ?? "",
+                    ContentType = c.ContentType ?? "",
+                    IsDlc = c.IsDlc,
+                };
+            }
             report();
             var info = read();
             if (info == null)
@@ -94,85 +119,6 @@ public static class LibraryScanner
         catch
         {
             return null;
-        }
-    }
-
-    private static PkgInfo Restore(CachedGame c, long size)
-    {
-        byte[]? icon = null;
-        try
-        {
-            if (!string.IsNullOrEmpty(c.IconB64))
-                icon = Convert.FromBase64String(c.IconB64);
-        }
-        catch
-        {
-        }
-        return new PkgInfo
-        {
-            Title = c.Title,
-            ContentId = c.ContentId,
-            TitleId = c.TitleId,
-            Platform = c.Platform,
-            Description = c.Description,
-            PackageSize = size,
-            Format = string.IsNullOrEmpty(c.Format) ? "pkg" : c.Format,
-            IsFolder = c.IsFolder,
-            IconData = icon,
-            Version = c.Version ?? "",
-            ContentType = c.ContentType ?? "",
-            IsDlc = c.IsDlc,
-        };
-    }
-
-    /// <summary>
-    /// Instant library from cache (no disk reads beyond stat): used at
-    /// startup so the list shows immediately without rescanning.
-    /// </summary>
-    public static List<ScannedGame> LoadCachedScans()
-    {
-        var result = new List<ScannedGame>();
-        var cache = LoadCacheGames();
-        foreach (var kv in cache)
-        {
-            try
-            {
-                string key = kv.Key;
-                var c = kv.Value;
-                if (c.IsFolder)
-                {
-                    if (!Directory.Exists(key))
-                        continue;
-                    result.Add(new ScannedGame(key, Restore(c, EstimateSize(key))));
-                }
-                else
-                {
-                    var fi = new FileInfo(key);
-                    if (!fi.Exists || fi.Length != c.Size ||
-                        fi.LastWriteTimeUtc.Ticks != c.Mtime)
-                        continue;
-                    result.Add(new ScannedGame(key, Restore(c, c.Size)));
-                }
-            }
-            catch
-            {
-            }
-        }
-        return result;
-    }
-
-    /// <summary>Forget saved game info (roots are kept); next scan reads everything fresh.</summary>
-    public static void ClearGameCache()
-    {
-        try
-        {
-            var roots = LoadRoots();
-            Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
-            File.WriteAllText(CachePath, JsonSerializer.Serialize(
-                new CacheFile(roots, new Dictionary<string, CachedGame>(), CacheVersion)));
-        }
-        catch
-        {
         }
     }
 
