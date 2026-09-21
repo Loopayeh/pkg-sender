@@ -4,7 +4,16 @@
 
 ## Download
 
-Get `PkgSender-Setup-X.Y.Z.exe` from [Releases](../../releases) — self-contained, no .NET needed, no admin needed. The matching `pkg-receiver.elf` is attached to the same release.
+Get `PkgSender-Setup-X.Y.Z.exe` from [Releases](../../releases) — self-contained, no .NET needed, no admin needed.
+
+> ⚠ **`pkg-receiver.elf` is PS5 ONLY.** PS4 does NOT need any ELF — it uses
+> Remote Package Installer or GoldHEN (see [Tutorial — PS4](#tutorial--ps4)).
+> Sending the ELF to a PS4 will not work.
+
+| Console | What runs on the console | Shipped where |
+| ------- | ------------------------ | ------------- |
+| PS5 | `pkg-receiver.elf` (send once via WebKit, stays listening on `12800`) | attached to the release + inside the PC install folder |
+| PS4 | **Remote Package Installer** homebrew (port `12800`) **or** GoldHEN with Payload Server on (ports `9090`/`9021`/`9020`) — install either yourself | not shipped, get it from its own release |
 
 On first launch the About window opens (support links live there).
 
@@ -46,12 +55,16 @@ Select `.exfat` / `.ffpkg` / `.ffpfsc` rows and press **Copy images** — they l
 
 ## Tutorial — PS4
 
+> No ELF, no USB, no FTP. The PS4 only needs a jailbreak plus one installer
+> service (below). PKG Sender pushes an install task to it; the PS4 then
+> downloads the PKG from your PC over plain HTTP (port `9898`).
+
 ### 1. Prepare the console
 
-Jailbreak the PS4 and start **one** of these (the app auto-detects in this order):
+Jailbreak the PS4 and start **one** of these (the app tries them in this order):
 
-1. **Remote Package Installer (RPI)** — serves its API on port `12800`.
-2. **GoldHEN with Payload Server enabled** — ports `9090` / `9021` / `9020`.
+1. **Remote Package Installer (RPI)** — install the RPI `.pkg` on the PS4 and run it (serves its API on port `12800`). Easiest path, use this one.
+2. **GoldHEN with Payload Server enabled** — enable it in GoldHEN settings (ports `9090` / `9021` / `9020`). PKG Sender injects its installer payload itself; you install nothing extra.
 
 ### 2. Connect and test
 
@@ -59,11 +72,12 @@ Same network as the PC (see [LAN connection](#lan-connection)). In PKG Sender ty
 
 ### 3. Install a PKG game
 
-1. Scan / add folder / drag & drop, select the game, press **Send PKG**.
+1. Drag & drop the `.pkg` file onto the window — it goes **straight to the send queue** (nothing is added to the library). Or scan/add a folder and select games, then press **Send PKG**.
 2. Tick **PS4 console** above the queue — PS4 installs go strictly one-by-one (a PS5 queues natively, a PS4 does not).
 3. What happens per mode:
-   - **RPI**: the PC sends the file URL to `http://<ps4>:12800/api/install`; the PS4 downloads and installs it itself.
-   - **GoldHEN**: payload injection over the binloader ports, then install.
+   - **RPI**: the PC sends the file URL to `http://<ps4>:12800/api/install`; the PS4 downloads and installs it itself. Watch it appear in RPI on the TV.
+   - **GoldHEN**: payload injection over the binloader ports, then the PS4 pulls the PKG from your PC. If the console reports a BGFT error (`0x80990033`), it couldn't reach `http://<pc-ip>:9898` — check the firewall rule and that the PC IP in the app is your real LAN address.
+4. The queue row stays live until the download finishes; **Resume** continues a stopped one instead of starting over.
 
 No FTP is involved on either console — all transfers are plain HTTP from the PC's file server (port `9898`).
 
