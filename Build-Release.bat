@@ -11,6 +11,7 @@ if errorlevel 1 (
   exit /b 1
 )
 copy /y payload\pkg-receiver.elf dist\pkg-receiver.elf >nul
+copy /y D:\OpenCode\pkg-viewer\pkgviewer.py dist\pkgviewer.py >nul
 echo.
 echo Published: dist\PkgSender.exe
 set ISCC=iscc
