@@ -73,6 +73,12 @@ public static class LibraryScanner
         {
             if (cache.TryGetValue(key, out var c) && c.Size == size && c.Mtime == mtime)
             {
+                // Heal stale image stubs: entries cached without an icon
+                // (bridge failed back then) are re-read until real data lands.
+                string cfmt = string.IsNullOrEmpty(c.Format) ? "pkg" : c.Format;
+                bool imageStub = cfmt != "pkg" && !c.IsFolder && string.IsNullOrEmpty(c.IconB64);
+                if (!imageStub)
+                {
                 byte[]? icon = null;
                 try
                 {
@@ -97,6 +103,7 @@ public static class LibraryScanner
                     ContentType = c.ContentType ?? "",
                     IsDlc = c.IsDlc,
                 };
+                }
             }
             report();
             var info = read();

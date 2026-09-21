@@ -817,28 +817,57 @@ public static class PythonHeader
     {
         if (_python != null)
             return _python;
+        // Prefer an interpreter that can actually run the bridge (mkpfs):
+        // a bare python without it silently yields bare-ID stubs.
         foreach (var c in new[] { "python", "python3", "py" })
         {
-            try
+            if (ProbePython(c, "-c \"import mkpfs; print('bridgeready')\"", "bridgeready", 15000))
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = c,
-                    Arguments = "--version",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
-                using var p = Process.Start(psi);
-                if (p != null && p.WaitForExit(8000) && p.ExitCode == 0)
-                {
-                    _python = c;
-                    return c;
-                }
+                _python = c;
+                return c;
             }
-            catch { }
+        }
+        foreach (var c in new[] { "python", "python3", "py" })
+        {
+            if (ProbePython(c, "--version", null, 8000))
+            {
+                _python = c;
+                return c;
+            }
         }
         return null;
+    }
+
+    private static bool ProbePython(string exe, string args, string? expect, int ms)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = exe,
+                Arguments = args,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi);
+            if (p == null)
+                return false;
+            var outTask = System.Threading.Tasks.Task.Run(() => p.StandardOutput.ReadToEnd());
+            if (!p.WaitForExit(ms))
+            {
+                try { p.Kill(); } catch { }
+                return false;
+            }
+            if (p.ExitCode != 0)
+                return false;
+            if (expect == null)
+                return true;
+            if (!System.Threading.Tasks.Task.WaitAll(new[] { outTask }, 5000))
+                return false;
+            return outTask.Result.Contains(expect);
+        }
+        catch { return false; }
     }
 }
