@@ -6,10 +6,11 @@
     <LangVersion>latest</LangVersion>
     <ApplicationId>com.loopayeh.pkgsender</ApplicationId>
     <ApplicationVersion>1</ApplicationVersion>
-    <ApplicationDisplayVersion>1.0.0-droid1</ApplicationDisplayVersion>
+    <ApplicationDisplayVersion>1.0.0-droid6</ApplicationDisplayVersion>
     <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="logo.png" />
     <ProjectReference Include="..\LoopDPI.Core\LoopDPI.Core.csproj" />
   </ItemGroup>
 </Project>
