@@ -261,6 +261,15 @@ public sealed class MainActivity : Activity
             }
             catch (Exception ex) { return (false, "name query: " + ex.Message); }
             string dest = System.IO.Path.Combine(CacheDir!.AbsolutePath, name);
+            bool have = false;
+            try
+            {
+                // same name + same size already cached? reuse, no copy.
+                var fi = new FileInfo(dest);
+                have = total > 0 && fi.Exists && fi.Length == total;
+            }
+            catch { }
+            if (!have)
             try
             {
                 Say($"copying {name}…");
