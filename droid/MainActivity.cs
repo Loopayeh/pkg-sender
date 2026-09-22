@@ -200,7 +200,9 @@ public sealed class MainActivity : Activity
             string pcIp = await Task.Run(() => PhoneIpFor(psIp));
             if (mode == "offline")
             {
-                Say($"console OFFLINE on {psIp} — enable RPI or GoldHEN Server. phone={pcIp} (same Wi-Fi?)");
+                Say("probing ports…");
+                string diag = await Ps4Installer.DiagnoseAsync(psIp);
+                Say($"OFFLINE {psIp} phone={pcIp}\n{diag}\n(all closed: wrong IP / console off / AP isolation)");
                 return;
             }
             // prove the phone can actually serve: start the real file

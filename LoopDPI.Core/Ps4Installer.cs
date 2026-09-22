@@ -69,6 +69,49 @@ public static class Ps4Installer
         return "offline";
     }
 
+    /// <summary>
+    /// Per-port diagnosis for the on-device Test button: TCP + HTTP per
+    /// port so we can tell "wrong IP / isolated" apart from "no service".
+    /// </summary>
+    public static async Task<string> DiagnoseAsync(string ip)
+    {
+        var sb = new StringBuilder();
+        sb.Append("12800: ").Append(await ProbeAsync(ip, 12800, "/api"));
+        sb.Append(" | 9090: ").Append(await ProbeAsync(ip, 9090, "/status"));
+        sb.Append(" | 9021: ").Append(await TcpOnlyAsync(ip, 9021));
+        sb.Append(" | 9020: ").Append(await TcpOnlyAsync(ip, 9020));
+        return sb.ToString();
+    }
+
+    private static async Task<string> TcpOnlyAsync(string ip, int port)
+    {
+        try
+        {
+            using var c = new TcpClient();
+            using var cts = new CancellationTokenSource(2000);
+            await c.ConnectAsync(ip, port, cts.Token);
+            return "open";
+        }
+        catch { return "closed"; }
+    }
+
+    private static async Task<string> ProbeAsync(string ip, int port, string path)
+    {
+        string tcp = await TcpOnlyAsync(ip, port);
+        if (tcp != "open") return "closed";
+        try
+        {
+            using var cts = new CancellationTokenSource(3000);
+            using var resp = await Http.GetAsync($"http://{ip}:{port}{path}", cts.Token);
+            string body = (await resp.Content.ReadAsStringAsync(cts.Token)).Trim();
+            if (body.Length > 70) body = body[..70] + "…";
+            return $"open HTTP {(int)resp.StatusCode} {body}";
+        }
+        catch (Exception ex) { return "open, HTTP fail (" + ShortErr(ex.Message) + ")"; }
+    }
+
+    private static string ShortErr(string s) => s.Length > 50 ? s[..50] : s;
+
     public static async Task<(bool Ok, string Method, string Reply)> PushAutoAsync(
         string psIp, string pcIp, string fileUrl, PkgInfo pkg, int fileServerPort = 9898)
     {
