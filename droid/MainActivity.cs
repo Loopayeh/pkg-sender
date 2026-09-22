@@ -6,9 +6,19 @@ using System.Threading.Tasks;
 using Android.App;
 using Android.Content;
 using Android.Graphics;
+using Android.Graphics.Drawables;
 using Android.OS;
 using Android.Views;
 using Android.Widget;
+using Google.Android.Material.AppBar;
+using Google.Android.Material.BottomSheet;
+using Google.Android.Material.Button;
+using Google.Android.Material.Card;
+using Google.Android.Material.CheckBox;
+using Google.Android.Material.Color;
+using Google.Android.Material.Dialog;
+using Google.Android.Material.ProgressIndicator;
+using Google.Android.Material.TextField;
 using LoopDPI.Core;
 
 namespace PkgSender.Droid;
@@ -19,15 +29,8 @@ public sealed class MainActivity : Activity
     const int PickReq = 1001;
     const int ServerPort = 9898;
 
-    static readonly Color Bg = Color.ParseColor("#171717");
-    static readonly Color Card = Color.ParseColor("#202020");
-    static readonly Color Card2 = Color.ParseColor("#2A2A2A");
-    static readonly Color Accent = Color.ParseColor("#4F8EF7");
-    static readonly Color Text = Color.ParseColor("#F1F3F8");
-    static readonly Color Muted = Color.ParseColor("#8B93A5");
     static readonly Color Good = Color.ParseColor("#8FD694");
     static readonly Color Bad = Color.ParseColor("#E17B7B");
-    static readonly Color DarkOnAccent = Color.ParseColor("#171717");
 
     sealed class LibItem
     {
@@ -44,152 +47,172 @@ public sealed class MainActivity : Activity
         public PkgInfo? Pkg;
         public bool Queued;
         public string State = "";
-        public LinearLayout? Row;
+        public MaterialCardView? Row;
         public TextView? StateView;
     }
 
+    sealed class MenuHandler : Java.Lang.Object, MaterialToolbar.IOnMenuItemClickListener
+    {
+        readonly Action _a;
+        public MenuHandler(Action a) { _a = a; }
+        public bool OnMenuItemClick(IMenuItem item) { _a(); return true; }
+    }
+
     readonly List<LibItem> _lib = new();
-    EditText? _psIp;
+    TextInputEditText? _psIp;
     LinearLayout? _libBox;
     TextView? _libHead;
     TextView? _status;
-    ProgressBar? _prog;
-    Button? _sendBtn;
-    Button? _testBtn;
+    LinearProgressIndicator? _prog;
+    MaterialButton? _sendBtn;
+    MaterialButton? _testBtn;
     RangeFileServer? _server;
     bool _busy;
+    Color _subColor = Color.Gray;
 
     int Dp(int dp) => (int)(dp * Resources!.DisplayMetrics!.Density);
+
+    int MatAttr(string name)
+    {
+        try { return Resources?.GetIdentifier(name, "attr", PackageName) ?? 0; }
+        catch { return 0; }
+    }
+
+    Color Dyn(string attrName, Color fallback)
+        => new Color(MaterialColors.GetColor(this, MatAttr(attrName), fallback));
+
+    MaterialButton FilledBtn(string text, Action onClick)
+    {
+        var b = new MaterialButton(this) { Text = text };
+        b.Click += (_, _) => onClick();
+        return b;
+    }
+
+    MaterialButton TonalBtn(string text, Action onClick)
+    {
+        var b = new MaterialButton(this) { Text = text };
+        b.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(
+            Dyn("colorPrimaryContainer", Color.LightGray));
+        b.SetTextColor(Dyn("colorOnPrimaryContainer", Color.Black));
+        b.Click += (_, _) => onClick();
+        return b;
+    }
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
-        Window?.SetStatusBarColor(new Color(0x10, 0x10, 0x14));
+        _subColor = Dyn("colorOnSurfaceVariant", Color.Gray);
 
-        var root = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        var lay = root;
-        lay.SetBackgroundColor(Bg);
+        var lay = new LinearLayout(this) { Orientation = Orientation.Vertical };
         int pad = Dp(16);
-        lay.SetPadding(pad, pad, pad, pad);
+        lay.SetPadding(pad, 0, pad, pad);
 
-        // header: logo + title + about
-        var head = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        head.SetGravity(GravityFlags.CenterVertical);
-        var logo = new ImageView(this);
+        var bar = new MaterialToolbar(this);
+        bar.Title = "PKG Sender";
+        bar.Subtitle = "PS4 / PS5 over LAN";
         try
         {
             using var s = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.logo.png");
-            if (s != null) logo.SetImageBitmap(BitmapFactory.DecodeStream(s));
+            if (s != null)
+                using (var bmp = BitmapFactory.DecodeStream(s))
+                    if (bmp != null)
+                        bar.Logo = new BitmapDrawable(Resources, bmp);
         }
         catch { }
-        logo.LayoutParameters = new LinearLayout.LayoutParams(Dp(48), Dp(48));
-        head.AddView(logo);
-        var titleBox = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        var t1 = new TextView(this) { Text = "PKG Sender" };
-        t1.SetTextColor(Text); t1.TextSize = 20; t1.SetTypeface(null, TypefaceStyle.Bold);
-        var t2 = new TextView(this) { Text = "PS4 / PS5 over LAN • by Loopayeh" };
-        t2.SetTextColor(Muted); t2.TextSize = 12;
-        titleBox.AddView(t1); titleBox.AddView(t2);
-        var tlp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
-        tlp.LeftMargin = Dp(12);
-        titleBox.LayoutParameters = tlp;
-        head.AddView(titleBox);
-        var about = GhostBtn("About", ShowAbout);
-        head.AddView(about);
-        lay.AddView(head);
+        bar.Menu.Add(0, 1, 0, "About");
+        bar.SetOnMenuItemClickListener(new MenuHandler(ShowAbout));
+        lay.AddView(bar);
 
-        // console row: IP + test
+        // console row: outlined IP + tonal test
         var ipRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        ipRow.SetGravity(GravityFlags.CenterVertical);
         var ipp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        ipp.TopMargin = Dp(12);
+        ipp.TopMargin = Dp(4);
         ipRow.LayoutParameters = ipp;
-        _psIp = new EditText(this) { Hint = "Console IP, e.g. 192.168.1.105" };
-        _psIp.SetTextColor(Text); _psIp.SetHintTextColor(Muted);
-        _psIp.Focusable = true;
-        _psIp.FocusableInTouchMode = true;
+        var ipWrap = new TextInputLayout(this, null, MatAttr("textInputOutlinedStyle"));
+        ipWrap.Hint = "Console IP, e.g. 192.168.1.105";
+        ipWrap.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        _psIp = new TextInputEditText(ipWrap.Context);
         _psIp.InputType = Android.Text.InputTypes.ClassText
             | Android.Text.InputTypes.TextVariationVisiblePassword;
-        _psIp.SetPadding(Dp(12), Dp(10), Dp(12), Dp(10));
         string? saved = GetPreferences(FileCreationMode.Private).GetString("psip", null);
         if (!string.IsNullOrEmpty(saved)) _psIp.Text = saved;
-        _psIp.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
-        ipRow.AddView(_psIp);
-        _testBtn = GhostBtn("Test", () => _ = TestAsync());
+        ipWrap.AddView(_psIp);
+        ipRow.AddView(ipWrap);
+        _testBtn = TonalBtn("Test", () => _ = TestAsync());
         var tbp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
         tbp.LeftMargin = Dp(8);
+        tbp.Gravity = GravityFlags.CenterVertical;
         _testBtn.LayoutParameters = tbp;
         ipRow.AddView(_testBtn);
         lay.AddView(ipRow);
 
-        // library header + add button
+        // library header + add
         var libRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         libRow.SetGravity(GravityFlags.CenterVertical);
         var llp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         llp.TopMargin = Dp(16);
         libRow.LayoutParameters = llp;
         _libHead = new TextView(this) { Text = "Library (0)" };
-        _libHead.SetTextColor(Text); _libHead.TextSize = 16; _libHead.SetTypeface(null, TypefaceStyle.Bold);
+        _libHead.TextSize = 18; _libHead.SetTypeface(null, TypefaceStyle.Bold);
         _libHead.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         libRow.AddView(_libHead);
-        libRow.AddView(AccentBtn("+ Add PKG", PickFlow));
+        libRow.AddView(TonalBtn("+ Add PKG", PickFlow));
         lay.AddView(libRow);
 
-        _libBox = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        // scrolling library
         var scroller = new ScrollView(this);
         scroller.LayoutParameters = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, 0, 1f);
+        _libBox = new LinearLayout(this) { Orientation = Orientation.Vertical };
         scroller.AddView(_libBox);
         lay.AddView(scroller);
 
-        // send queue
-        _sendBtn = AccentBtn("Send queue", () => _ = SendQueueAsync());
+        // send + progress + status
+        _sendBtn = FilledBtn("Send queue", () => _ = SendQueueAsync());
         var sbp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        sbp.TopMargin = Dp(16);
+        sbp.TopMargin = Dp(12);
         _sendBtn.LayoutParameters = sbp;
         lay.AddView(_sendBtn);
 
-        _prog = new ProgressBar(this, null, Android.Resource.Attribute.ProgressBarStyleHorizontal);
-        _prog.Max = 100;
+        _prog = new LinearProgressIndicator(this);
         var pbp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         pbp.TopMargin = Dp(8);
         _prog.LayoutParameters = pbp;
         _prog.Visibility = ViewStates.Gone;
         lay.AddView(_prog);
 
-        _status = new TextView(this) { Text = "idle — add a PKG, tap it to queue, then Send" };
-        _status.SetTextColor(Muted); _status.TextSize = 13;
+        _status = new TextView(this) { Text = "idle — add a PKG, tick it, then Send" };
+        _status.SetTextColor(_subColor); _status.TextSize = 13;
         var stp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         stp.TopMargin = Dp(8);
         _status.LayoutParameters = stp;
         lay.AddView(_status);
 
-        SetContentView(root);
+        SetContentView(lay);
         RefreshLib();
-    }
-
-    Button AccentBtn(string text, Action onClick)
-    {
-        var b = new Button(this) { Text = text };
-        b.Click += (_, _) => onClick();
-        return b;
-    }
-
-    Button GhostBtn(string text, Action onClick)
-    {
-        var b = new Button(this) { Text = text };
-        b.Click += (_, _) => onClick();
-        return b;
     }
 
     void ShowAbout()
     {
-        new AlertDialog.Builder(this)
-            .SetTitle("PKG Sender")
-            .SetMessage("1.0.0 (droid)\nby Loopayeh\n\ngithub.com/Loopayeh/pkg-sender\n\nInstalls PS4/PS5 games over LAN.\nRun pkg-receiver.elf on PS5 or RPI/GoldHEN on PS4.")
-            .SetPositiveButton("OK", (_, _) => { })
-            .Show();
+        var dlg = new BottomSheetDialog(this);
+        var v = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        int pad = Dp(24);
+        v.SetPadding(pad, pad, pad, pad);
+        var t = new TextView(this) { Text = "PKG Sender" };
+        t.TextSize = 20; t.SetTypeface(null, TypefaceStyle.Bold);
+        var b = new TextView(this)
+        {
+            Text = "1.0.0 (droid) • by Loopayeh\n\ngithub.com/Loopayeh/pkg-sender\n\nInstalls PS4/PS5 games over LAN.\nRun pkg-receiver.elf on PS5 or RPI/GoldHEN on PS4."
+        };
+        b.SetTextColor(_subColor); b.TextSize = 14;
+        var bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        bp.TopMargin = Dp(8); bp.BottomMargin = Dp(16);
+        b.LayoutParameters = bp;
+        var close = FilledBtn("Close", () => dlg.Dismiss());
+        v.AddView(t); v.AddView(b); v.AddView(close);
+        dlg.SetContentView(v);
+        dlg.Show();
     }
 
     // ---------- library ----------
@@ -239,7 +262,7 @@ public sealed class MainActivity : Activity
             RunOnUiThread(() =>
             {
                 RefreshLib();
-                Say(total > 0 ? $"{total} added — tap to queue"
+                Say(total > 0 ? $"{total} added — tick to queue"
                     : string.IsNullOrEmpty(errMsg) ? "nothing added" : "add failed: " + Short(errMsg));
             });
         });
@@ -542,26 +565,30 @@ public sealed class MainActivity : Activity
         if (_lib.Count == 0)
         {
             var e = new TextView(this) { Text = "empty — + Add PKG to stage games from your phone" };
-            e.SetTextColor(Muted); e.TextSize = 13;
-            e.SetPadding(Dp(4), Dp(8), Dp(4), Dp(8));
+            e.SetTextColor(_subColor); e.TextSize = 13;
+            e.SetPadding(Dp(4), Dp(12), Dp(4), Dp(12));
             box.AddView(e);
         }
         if (_sendBtn != null) _sendBtn.Text = q > 0 ? $"Send queue ({q})" : "Send queue";
     }
 
-    LinearLayout BuildRow(LibItem it)
+    MaterialCardView BuildRow(LibItem it)
     {
+        var card = new MaterialCardView(this);
+        var cp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        cp.TopMargin = Dp(6); cp.BottomMargin = Dp(6);
+        card.LayoutParameters = cp;
+        card.Radius = Dp(16);
+        card.CardElevation = Dp(1);
+
         var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         row.SetGravity(GravityFlags.CenterVertical);
-        row.SetBackgroundColor(it.Queued ? Card2 : Card);
-        row.SetPadding(Dp(8), Dp(8), Dp(8), Dp(8));
-        var rp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        rp.TopMargin = Dp(6);
-        row.LayoutParameters = rp;
+        row.SetPadding(Dp(12), Dp(12), Dp(12), Dp(12));
+        card.AddView(row);
 
         var img = new ImageView(this);
         var ilp = new LinearLayout.LayoutParams(Dp(56), Dp(56));
-        ilp.RightMargin = Dp(10);
+        ilp.RightMargin = Dp(12);
         img.LayoutParameters = ilp;
         img.SetScaleType(ImageView.ScaleType.CenterCrop);
         Bitmap? bmp = null;
@@ -574,38 +601,37 @@ public sealed class MainActivity : Activity
         if (bmp != null)
             img.SetImageBitmap(bmp);
         else
-        {
-            img.SetBackgroundColor(Card2);
             img.SetImageResource(Android.Resource.Drawable.IcMenuGallery);
-        }
         row.AddView(img);
 
         var txt = new LinearLayout(this) { Orientation = Orientation.Vertical };
         txt.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         var a = new TextView(this) { Text = it.Title };
-        a.SetTextColor(Text); a.TextSize = 15; a.SetTypeface(null, TypefaceStyle.Bold);
+        a.TextSize = 16; a.SetTypeface(null, TypefaceStyle.Bold);
         a.SetSingleLine(true); a.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
-        var b = new TextView(this) { Text = $"{it.Format.ToUpperInvariant()} • {it.TitleId} • {SizeStr(it.Size)}{(it.Direct ? " • direct" : "")}" };
-        b.SetTextColor(Muted); b.TextSize = 12;
+        var b = new TextView(this)
+        {
+            Text = $"{it.Format.ToUpperInvariant()} • {it.TitleId} • {SizeStr(it.Size)}{(it.Direct ? " • direct" : "")}"
+        };
+        b.SetTextColor(_subColor); b.TextSize = 13;
         txt.AddView(a); txt.AddView(b);
         it.StateView = new TextView(this) { Text = it.State };
-        it.StateView.SetTextColor(it.State.StartsWith("done") ? Good : it.State.StartsWith("fail") ? Bad : Accent);
-        it.StateView.TextSize = 12;
+        it.StateView.SetTextColor(it.State.StartsWith("done") ? Good : it.State.StartsWith("fail") ? Bad : _subColor);
+        it.StateView.TextSize = 13;
         txt.AddView(it.StateView);
         row.AddView(txt);
 
-        var cb = new CheckBox(this) { Checked = it.Queued };
+        var cb = new MaterialCheckBox(this) { Checked = it.Queued };
         cb.CheckedChange += (_, e) =>
         {
             it.Queued = e.IsChecked;
-            row.SetBackgroundColor(it.Queued ? Card2 : Card);
             RefreshSendLabel();
         };
         row.AddView(cb);
         row.Clickable = true;
         row.Click += (_, _) => { cb.Checked = !cb.Checked; };
-        it.Row = row;
-        return row;
+        it.Row = card;
+        return card;
     }
 
     void RefreshSendLabel()
@@ -630,7 +656,7 @@ public sealed class MainActivity : Activity
         _busy = true;
         _sendBtn!.Enabled = false;
         _testBtn!.Enabled = false;
-        RunOnUiThread(() => { _prog!.Max = queue.Count; _prog.Progress = 0; _prog.Visibility = ViewStates.Visible; });
+        RunOnUiThread(() => { _prog!.Max = queue.Count; _prog.SetProgressCompat(0, false); _prog.Visibility = ViewStates.Visible; });
         try
         {
             string pcIp = await Task.Run(() => PhoneIpFor(psIp));
@@ -643,7 +669,7 @@ public sealed class MainActivity : Activity
                 SetState(it, ok ? "done" : "failed");
                 if (ok) done++;
                 int d = done, n = queue.Count;
-                RunOnUiThread(() => { _prog!.Progress = d; });
+                RunOnUiThread(() => { _prog!.SetProgressCompat(d, true); });
                 Say($"{d}/{n} sent");
             }
             Say(done == queue.Count ? $"all {done} sent — watch the console." : $"{done}/{queue.Count} sent, {queue.Count - done} failed");
@@ -664,7 +690,7 @@ public sealed class MainActivity : Activity
             if (it.StateView != null)
             {
                 it.StateView.Text = s;
-                it.StateView.SetTextColor(s.StartsWith("done") ? Good : s.StartsWith("fail") ? Bad : Accent);
+                it.StateView.SetTextColor(s.StartsWith("done") ? Good : s.StartsWith("fail") ? Bad : _subColor);
             }
         });
     }

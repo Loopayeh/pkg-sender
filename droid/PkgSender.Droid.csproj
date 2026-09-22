@@ -13,4 +13,7 @@
     <EmbeddedResource Include="logo.png" />
     <ProjectReference Include="..\LoopDPI.Core\LoopDPI.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Xamarin.Google.Android.Material" Version="1.12.0.2" />
+  </ItemGroup>
 </Project>
