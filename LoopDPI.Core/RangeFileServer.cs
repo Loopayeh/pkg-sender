@@ -418,7 +418,9 @@ public sealed class RangeFileServer : IDisposable
             try
             {
                 using Stream fs = src != null ? src.OpenAt(start) : OpenFileAt(path!, start);
-                var buf = new byte[4 * 1024 * 1024];
+                // 256KB: 16 parallel receiver segments share the 256MB app
+                // heap — 4MB buffers OOM the phone (~270MB into a copy).
+                var buf = new byte[256 * 1024];
                 while (length > 0 && !ct.IsCancellationRequested)
                 {
                     int want = (int)Math.Min(buf.Length, length);

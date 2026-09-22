@@ -338,8 +338,21 @@ public sealed class MainActivity : Activity
         { _cr = cr; _uri = uri; Length = len; }
         public Stream OpenAt(long offset)
         {
-            var (ch, fin, pfd) = OpenChannelAt(_cr, _uri, offset);
-            return new SafStream(ch, fin, pfd, Length, offset);
+            Exception? last = null;
+            for (int a = 0; a < 3; a++)
+            {
+                try
+                {
+                    var (ch, fin, pfd) = OpenChannelAt(_cr, _uri, offset);
+                    return new SafStream(ch, fin, pfd, Length, offset);
+                }
+                catch (Exception ex)
+                {
+                    last = ex;
+                    try { System.Threading.Thread.Sleep(150); } catch { }
+                }
+            }
+            throw last ?? new IOException("open failed");
         }
     }
 
