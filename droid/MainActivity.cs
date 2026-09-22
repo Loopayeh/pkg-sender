@@ -61,12 +61,11 @@ public sealed class MainActivity : Activity
         base.OnCreate(savedInstanceState);
         Window?.SetStatusBarColor(new Color(0x10, 0x10, 0x14));
 
-        var root = new ScrollView(this);
-        var lay = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        var root = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        var lay = root;
         lay.SetBackgroundColor(Bg);
         int pad = Dp(16);
         lay.SetPadding(pad, pad, pad, pad);
-        root.AddView(lay);
 
         // header: logo + title + about
         var head = new LinearLayout(this) { Orientation = Orientation.Horizontal };
@@ -102,7 +101,10 @@ public sealed class MainActivity : Activity
         ipRow.LayoutParameters = ipp;
         _psIp = new EditText(this) { Hint = "Console IP, e.g. 192.168.1.105" };
         _psIp.SetTextColor(Text); _psIp.SetHintTextColor(Muted);
-        _psIp.SetBackgroundColor(Card2);
+        _psIp.Focusable = true;
+        _psIp.FocusableInTouchMode = true;
+        _psIp.InputType = Android.Text.InputTypes.ClassText
+            | Android.Text.InputTypes.TextVariationVisiblePassword;
         _psIp.SetPadding(Dp(12), Dp(10), Dp(12), Dp(10));
         string? saved = GetPreferences(FileCreationMode.Private).GetString("psip", null);
         if (!string.IsNullOrEmpty(saved)) _psIp.Text = saved;
@@ -129,10 +131,11 @@ public sealed class MainActivity : Activity
         lay.AddView(libRow);
 
         _libBox = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        var lbp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        lbp.TopMargin = Dp(8);
-        _libBox.LayoutParameters = lbp;
-        lay.AddView(_libBox);
+        var scroller = new ScrollView(this);
+        scroller.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, 0, 1f);
+        scroller.AddView(_libBox);
+        lay.AddView(scroller);
 
         // send queue
         _sendBtn = AccentBtn("Send queue", () => _ = SendQueueAsync());
@@ -163,8 +166,6 @@ public sealed class MainActivity : Activity
     Button AccentBtn(string text, Action onClick)
     {
         var b = new Button(this) { Text = text };
-        b.SetTextColor(DarkOnAccent);
-        b.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(Accent);
         b.Click += (_, _) => onClick();
         return b;
     }
@@ -172,8 +173,6 @@ public sealed class MainActivity : Activity
     Button GhostBtn(string text, Action onClick)
     {
         var b = new Button(this) { Text = text };
-        b.SetTextColor(Text);
-        b.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(Color.ParseColor("#404040"));
         b.Click += (_, _) => onClick();
         return b;
     }
