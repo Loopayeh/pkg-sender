@@ -105,9 +105,8 @@ public sealed class MainActivity : Activity
         _sendBtn!.Enabled = false;
         try
         {
-            Say("finding PC address…");
-            var nets = await Task.Run(() => NetDiscovery.GetLanNetworks());
-            string? pcIp = NetDiscovery.BestPcIpFor(nets, psIp) ?? "0.0.0.0";
+            Say("finding phone address…");
+            string pcIp = await Task.Run(() => PhoneIpFor(psIp));
             Say($"PC={pcIp} starting server…");
 
             _server?.Dispose();
@@ -146,6 +145,49 @@ public sealed class MainActivity : Activity
     void Say(string s) => RunOnUiThread(() => _status!.Text = s);
     static string Short(string s) => s.Length > 140 ? s[..140] : s;
 
+    /// <summary>
+    /// Phone's Wi-Fi IP via Android WifiManager — far more reliable on
+    /// Android than interface enumeration (which can return mobile/VPN).
+    /// Falls back to NetDiscovery when Wi-Fi is off.
+    /// </summary>
+    string PhoneIpFor(string psIp)
+    {
+        string wifiIp = "0.0.0.0";
+        try
+        {
+            var wifi = (Android.Net.Wifi.WifiManager?)GetSystemService(WifiService);
+            int ip = wifi?.ConnectionInfo?.IpAddress ?? 0;
+            if (ip != 0)
+                wifiIp = $"{ip & 0xff}.{(ip >> 8) & 0xff}.{(ip >> 16) & 0xff}.{(ip >> 24) & 0xff}";
+        }
+        catch { }
+        if (wifiIp != "0.0.0.0")
+        {
+            // same /24 as the console? then it is definitely the right one
+            try
+            {
+                var w = System.Net.IPAddress.Parse(wifiIp).GetAddressBytes();
+                var p = System.Net.IPAddress.Parse(psIp).GetAddressBytes();
+                if (w[0] == p[0] && w[1] == p[1] && w[2] == p[2])
+                    return wifiIp;
+            }
+            catch { }
+            // Wi-Fi on but different subnet: still prefer it over 0.0.0.0,
+            // unless enumeration finds a same-subnet match
+            var nets = NetDiscovery.GetLanNetworks();
+            string? same = null;
+            try
+            {
+                var ps = System.Net.IPAddress.Parse(psIp);
+                same = nets.FirstOrDefault(n => n.Contains(ps))?.Address.ToString();
+            }
+            catch { }
+            return same ?? wifiIp;
+        }
+        var nets2 = NetDiscovery.GetLanNetworks();
+        return NetDiscovery.BestPcIpFor(nets2, psIp) ?? "0.0.0.0";
+    }
+
     async Task TestAsync()
     {
         string psIp = (_psIp?.Text ?? "").Trim();
@@ -155,8 +197,7 @@ public sealed class MainActivity : Activity
         {
             Say("probing console (12800/9090)…");
             string mode = await Ps4Installer.DetectAsync(psIp);
-            var nets = await Task.Run(() => NetDiscovery.GetLanNetworks());
-            string pcIp = NetDiscovery.BestPcIpFor(nets, psIp) ?? "0.0.0.0";
+            string pcIp = await Task.Run(() => PhoneIpFor(psIp));
             if (mode == "offline")
             {
                 Say($"console OFFLINE on {psIp} — enable RPI or GoldHEN Server. phone={pcIp} (same Wi-Fi?)");
