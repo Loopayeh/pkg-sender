@@ -78,7 +78,11 @@ public sealed class MainActivity : Activity
     TextInputEditText? _psIp;
     LinearLayout? _libBox;
     TextView? _libHead;
-    TextView? _status;
+    TextView? _statusTitle;
+    TextView? _statusDetail;
+    MaterialCardView? _statusCard;
+    MaterialCardView? _heroCard;
+    TextView? _connView;
     LinearProgressIndicator? _prog;
     MaterialButton? _sendBtn;
     MaterialButton? _testBtn;
@@ -244,7 +248,15 @@ public sealed class MainActivity : Activity
         _testBtn.LayoutParameters = tbp;
         ipRow.AddView(_testBtn);
         heroIn.AddView(ipRow);
+        _connView = new TextView(this) { Text = "● not tested" };
+        _connView.TextSize = 13; _connView.SetTypeface(null, TypefaceStyle.Bold);
+        _connView.SetTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
+        var cnp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        cnp.TopMargin = Dp(12);
+        _connView.LayoutParameters = cnp;
+        heroIn.AddView(_connView);
         lay.AddView(hero);
+        _heroCard = hero;
 
         // library header + add
         var libRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
@@ -280,22 +292,60 @@ public sealed class MainActivity : Activity
         _sendBtn.LayoutParameters = sbp;
         lay.AddView(_sendBtn);
 
-        _prog = new LinearProgressIndicator(this);
-        var pbp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        pbp.TopMargin = Dp(8);
-        _prog.LayoutParameters = pbp;
-        _prog.Visibility = ViewStates.Gone;
-        lay.AddView(_prog);
+        _statusCard = new MaterialCardView(this);
+        var scp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        scp.TopMargin = Dp(12);
+        _statusCard.LayoutParameters = scp;
+        _statusCard.Radius = Dp(16);
+        _statusCard.CardElevation = Dp(0);
+        try { _statusCard.SetCardBackgroundColor(Dyn("colorSurfaceContainer", Color.ParseColor("#F3EDF7"))); } catch { }
+        var scIn = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        scIn.SetPadding(Dp(14), Dp(12), Dp(14), Dp(12));
+        _statusCard.AddView(scIn);
 
-        _status = new TextView(this) { Text = "idle — add a PKG, tick it, then Send" };
-        _status.SetTextColor(_subColor); _status.TextSize = 13;
-        var stp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        stp.TopMargin = Dp(8);
-        _status.LayoutParameters = stp;
-        lay.AddView(_status);
+        _prog = new LinearProgressIndicator(this);
+        _prog.Visibility = ViewStates.Gone;
+        scIn.AddView(_prog);
+
+        _statusTitle = new TextView(this) { Text = "Ready" };
+        _statusTitle.TextSize = 15; _statusTitle.SetTypeface(null, TypefaceStyle.Bold);
+        try { _statusTitle.SetTextColor(Dyn("colorOnSurface", Color.Black)); } catch { }
+        _statusTitle.SetSingleLine(true); _statusTitle.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        scIn.AddView(_statusTitle);
+
+        _statusDetail = new TextView(this) { Text = "add a PKG, tick it, then Send" };
+        _statusDetail.SetTextColor(_subColor); _statusDetail.TextSize = 12;
+        _statusDetail.SetMaxLines(3);
+        _statusDetail.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        scIn.AddView(_statusDetail);
+        lay.AddView(_statusCard);
 
         SetContentView(lay);
         RefreshLib();
+    }
+
+    void SetConn(bool? ok, string text)
+    {
+        RunOnUiThread(() =>
+        {
+            try
+            {
+                if (_connView != null)
+                {
+                    _connView.Text = (ok == null ? "○ " : "● ") + text;
+                    _connView.SetTextColor(ok == true ? Color.ParseColor("#2E7D32")
+                        : ok == false ? Color.ParseColor("#C62828")
+                        : Dyn("colorOnSurfaceVariant", Color.Gray));
+                }
+                if (_heroCard != null)
+                {
+                    _heroCard.StrokeWidth = ok == null ? 0 : Dp(2);
+                    if (ok != null)
+                        _heroCard.StrokeColor = ok == true ? Color.ParseColor("#2E7D32") : Color.ParseColor("#C62828");
+                }
+            }
+            catch { }
+        });
     }
 
     void ShowLog()
@@ -805,15 +855,56 @@ public sealed class MainActivity : Activity
 
         var txt = new LinearLayout(this) { Orientation = Orientation.Vertical };
         txt.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        var titleRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        titleRow.SetGravity(GravityFlags.CenterVertical);
         var a = new TextView(this) { Text = it.Title };
         a.TextSize = 16; a.SetTypeface(null, TypefaceStyle.Bold);
         a.SetSingleLine(true); a.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        a.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        titleRow.AddView(a);
+        // platform badge: PS5 / PS4 / format fallback
+        string plat = (it.Platform ?? "").Trim().ToUpperInvariant();
+        string badgeTxt = plat.StartsWith("PS5") ? "PS5" : plat.StartsWith("PS4") ? "PS4"
+            : (it.Format ?? "").Trim().ToUpperInvariant();
+        if (!string.IsNullOrEmpty(badgeTxt))
+        {
+            var badge = new TextView(this) { Text = badgeTxt };
+            badge.TextSize = 11; badge.SetTypeface(null, TypefaceStyle.Bold);
+            badge.SetPadding(Dp(8), Dp(3), Dp(8), Dp(3));
+            try
+            {
+                var bd = new GradientDrawable();
+                bd.SetCornerRadius(Dp(8));
+                if (badgeTxt == "PS5")
+                {
+                    bd.SetColor(Dyn("colorPrimaryContainer", Color.ParseColor("#EADDFF")));
+                    badge.SetTextColor(Dyn("colorOnPrimaryContainer", Color.ParseColor("#4F378B")));
+                }
+                else if (badgeTxt == "PS4")
+                {
+                    bd.SetColor(Dyn("colorSecondaryContainer", Color.ParseColor("#CCC2DC")));
+                    badge.SetTextColor(Dyn("colorOnSecondaryContainer", Color.ParseColor("#332D41")));
+                }
+                else
+                {
+                    bd.SetColor(Dyn("colorSurfaceVariant", Color.ParseColor("#E1E2EC")));
+                    badge.SetTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
+                }
+                badge.SetBackgroundDrawable(bd);
+            }
+            catch { }
+            var blp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+            blp.LeftMargin = Dp(8);
+            badge.LayoutParameters = blp;
+            titleRow.AddView(badge);
+        }
+        txt.AddView(titleRow);
         var b = new TextView(this)
         {
             Text = $"{it.Format.ToUpperInvariant()} • {it.TitleId} • {SizeStr(it.Size)}{(it.Direct ? " • direct" : "")}"
         };
         b.SetTextColor(_subColor); b.TextSize = 13;
-        txt.AddView(a); txt.AddView(b);
+        txt.AddView(b);
         it.StateView = new TextView(this) { Text = it.State };
         it.StateView.SetTextColor(it.State.StartsWith("done") ? Good : it.State.StartsWith("fail") ? Bad : _subColor);
         it.StateView.TextSize = 13;
@@ -1160,12 +1251,14 @@ public sealed class MainActivity : Activity
         try
         {
             Say("probing console (12800/9090)…");
+            SetConn(null, "probing…");
             string mode = await Ps4Installer.DetectAsync(psIp, fresh: true);
             string pcIp = await Task.Run(() => PhoneIpFor(psIp));
             if (mode == "offline")
             {
                 Say("probing ports…");
                 string diag = await Ps4Installer.DiagnoseAsync(psIp);
+                SetConn(false, "offline — " + psIp);
                 Say($"OFFLINE {psIp} phone={pcIp}\n{diag}\n(all closed: wrong IP / console off / AP isolation)");
                 return;
             }
@@ -1199,8 +1292,9 @@ public sealed class MainActivity : Activity
             catch (Exception ex) { serve = "server FAILED: " + Short(ex.Message); }
             finally { try { probe?.Dispose(); } catch { } }
             Say($"console={mode} phone={pcIp} {serve}");
+            SetConn(true, $"connected ({mode}) • {psIp}");
         }
-        catch (Exception ex) { Say("test error: " + Short(ex.Message)); }
+        catch (Exception ex) { SetConn(false, "test failed"); Say("test error: " + Short(ex.Message)); }
     }
 
     /// <summary>
@@ -1243,7 +1337,23 @@ public sealed class MainActivity : Activity
         return NetDiscovery.BestPcIpFor(nets2, psIp) ?? "0.0.0.0";
     }
 
-    void Say(string s) => RunOnUiThread(() => _status!.Text = s);
+    void Say(string s) => RunOnUiThread(() =>
+    {
+        try
+        {
+            // first line = headline, rest = collapsible-looking detail
+            int nl = s.IndexOf('\n');
+            string head = nl < 0 ? s : s[..nl].Trim();
+            string tail = nl < 0 ? "" : s[(nl + 1)..].Trim();
+            if (_statusTitle != null) _statusTitle.Text = head.Length > 90 ? head[..90] + "…" : head;
+            if (_statusDetail != null)
+            {
+                _statusDetail.Text = tail;
+                _statusDetail.Visibility = string.IsNullOrEmpty(tail) ? ViewStates.Gone : ViewStates.Visible;
+            }
+        }
+        catch { }
+    });
     static string Short(string s) => s.Length > 140 ? s[..140] : s;
 
     protected override void OnDestroy()
