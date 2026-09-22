@@ -216,16 +216,29 @@ public sealed class MainActivity : Activity
         else if (data.Data != null)
             uris.Add(data.Data);
         if (uris.Count == 0) return;
+        Say($"reading {uris.Count} file(s)…");
         _ = Task.Run(async () =>
         {
             int n = 0;
+            string lastErr = "";
             foreach (var u in uris)
-                if (await AddUriAsync(u)) n++;
-            RunOnUiThread(() => { RefreshLib(); Say(n > 0 ? $"{n} added — tap to queue" : "nothing added"); });
+            {
+                var (added, err) = await AddUriAsync(u);
+                if (added) n++;
+                else if (!string.IsNullOrEmpty(err)) lastErr = err;
+            }
+            int total = n;
+            string errMsg = lastErr;
+            RunOnUiThread(() =>
+            {
+                RefreshLib();
+                Say(total > 0 ? $"{total} added — tap to queue"
+                    : string.IsNullOrEmpty(errMsg) ? "nothing added" : "add failed: " + Short(errMsg));
+            });
         });
     }
 
-    async Task<bool> AddUriAsync(Android.Net.Uri uri)
+    async Task<(bool Added, string Err)> AddUriAsync(Android.Net.Uri uri)
     {
         try
         {
@@ -239,21 +252,25 @@ public sealed class MainActivity : Activity
                     if (idx >= 0) name = c.GetString(idx) ?? name;
                 }
             }
-            catch { }
+            catch (Exception ex) { return (false, "name query: " + ex.Message); }
             string dest = System.IO.Path.Combine(CacheDir!.AbsolutePath, name);
-            using (var src = ContentResolver!.OpenInputStream(uri)!)
-            using (var dst = File.Create(dest))
-                await src.CopyToAsync(dst);
+            try
+            {
+                using (var src = ContentResolver!.OpenInputStream(uri)!)
+                using (var dst = File.Create(dest))
+                    await src.CopyToAsync(dst);
+            }
+            catch (Exception ex) { return (false, "copy: " + ex.Message); }
             PkgInfo? pkg = null;
             try
             {
                 using var fs = File.Open(dest, FileMode.Open, FileAccess.Read, FileShare.Read);
                 pkg = PkgReader.Read(fs);
             }
-            catch { }
+            catch (Exception ex) { return (false, "parse: " + ex.Message); }
             lock (_lib)
             {
-                if (_lib.Any(x => x.Path == dest)) return false;
+                if (_lib.Any(x => x.Path == dest)) return (false, "");
                 _lib.Add(new LibItem
                 {
                     Path = dest,
@@ -265,9 +282,9 @@ public sealed class MainActivity : Activity
                     Queued = true,
                 });
             }
-            return true;
+            return (true, "");
         }
-        catch { return false; }
+        catch (Exception ex) { return (false, ex.Message); }
     }
 
     static string SizeStr(long n) =>
