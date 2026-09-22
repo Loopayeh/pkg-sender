@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="logo.png" />
+    <AndroidResource Include="Resources\drawable\logo.png" />
     <ProjectReference Include="..\LoopDPI.Core\LoopDPI.Core.csproj" />
   </ItemGroup>
   <ItemGroup>

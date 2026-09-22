@@ -23,7 +23,7 @@ using LoopDPI.Core;
 
 namespace PkgSender.Droid;
 
-[Activity(Label = "PKG Sender • by Loopayeh", MainLauncher = true, Exported = true)]
+[Activity(Label = "PKG Sender • by Loopayeh", MainLauncher = true, Exported = true, Icon = "@drawable/logo")]
 public sealed class MainActivity : Activity
 {
     const int PickReq = 1001;
@@ -163,7 +163,12 @@ public sealed class MainActivity : Activity
             if (s != null)
                 using (var bmp = BitmapFactory.DecodeStream(s))
                     if (bmp != null)
-                        bar.Logo = new BitmapDrawable(Resources, bmp);
+                    {
+                        // 1024px logo -> small 40dp toolbar mark
+                        int sz = Dp(40);
+                        using var scaled = Bitmap.CreateScaledBitmap(bmp, sz, sz, true);
+                        bar.Logo = new BitmapDrawable(Resources, scaled);
+                    }
         }
         catch { }
         bar.Menu.Add(0, 1, 0, "Log");
