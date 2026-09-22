@@ -164,8 +164,19 @@ public sealed class RangeFileServer : IDisposable
         }
     }
 
+    private int _active;
+    /// <summary>Live request count (pile-up detector for the app log).</summary>
+    public int ActiveRequests => _active;
+    private sealed class ActiveGuard : IDisposable
+    {
+        private readonly RangeFileServer _s;
+        public ActiveGuard(RangeFileServer s) { _s = s; Interlocked.Increment(ref _s._active); }
+        public void Dispose() { Interlocked.Decrement(ref _s._active); }
+    }
+
     private async Task Handle(TcpClient cl, CancellationToken ct)
     {
+        using var _guard = new ActiveGuard(this);
         // Bulk-send tuning: big kernel send buffer so the PS5 can pull at
         // line rate instead of a few MB/s (same class of fix as zftpd's).
         try
@@ -214,7 +225,7 @@ public sealed class RangeFileServer : IDisposable
             string noQuery = rawTarget.Split('?')[0];
             string clientIp = "unknown";
             try { clientIp = (cl.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "unknown"; } catch { }
-            void Log(string status) { try { RequestLog?.Invoke($"{clientIp} {method} {noQuery} -> {status}"); } catch { } }
+            void Log(string status) { try { RequestLog?.Invoke($"{clientIp} {method} {noQuery} -> {status} [a={ActiveRequests}]"); } catch { } }
             Log("in");
             // /catalog: JSON library for the console browser (PKG only).
             if (noQuery.Equals("/catalog", StringComparison.OrdinalIgnoreCase))

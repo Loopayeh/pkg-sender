@@ -60,6 +60,7 @@ public sealed class MainActivity : Activity
 
     readonly List<LibItem> _lib = new();
     readonly System.Collections.Concurrent.ConcurrentQueue<string> _logQ = new();
+    readonly object _logFileLock = new();
     string _logPath = "";
     void AddLog(string s)
     {
@@ -69,7 +70,8 @@ public sealed class MainActivity : Activity
             _logQ.Enqueue(line);
             while (_logQ.Count > 300 && _logQ.TryDequeue(out _)) { }
             if (!string.IsNullOrEmpty(_logPath))
-                File.AppendAllText(_logPath, line + "\n");
+                lock (_logFileLock)
+                    File.AppendAllText(_logPath, line + "\n");
         }
         catch { }
     }
@@ -397,6 +399,9 @@ public sealed class MainActivity : Activity
         readonly Android.OS.ParcelFileDescriptor _pfd;
         readonly long _len;
         long _pos;
+        // one reused direct buffer: per-read Allocate() churned 34k native
+        // buffers per transfer and starved the runtime under 16 threads.
+        readonly Java.Nio.ByteBuffer _bb = Java.Nio.ByteBuffer.Allocate(64 * 1024);
         public SafStream(Java.Nio.Channels.FileChannel ch,
             Java.IO.FileInputStream fin, Android.OS.ParcelFileDescriptor pfd,
             long len, long pos)
@@ -413,13 +418,20 @@ public sealed class MainActivity : Activity
         public override void Flush() { }
         public override int Read(byte[] buffer, int offset, int count)
         {
-            var bb = Java.Nio.ByteBuffer.Allocate(count);
-            int n = _ch.Read(bb);
-            if (n <= 0) return 0; // Stream contract: 0 at end, never -1
-            bb.Flip();
-            bb.Get(buffer, offset, n);
-            _pos += n;
-            return n;
+            int total = 0;
+            while (total < count)
+            {
+                _bb.Clear();
+                int lim = Math.Min(_bb.Capacity(), count - total);
+                _bb.Limit(lim);
+                int n = _ch.Read(_bb);
+                if (n <= 0) return total;
+                _bb.Flip();
+                _bb.Get(buffer, offset + total, n);
+                total += n;
+                _pos += n;
+            }
+            return total;
         }
         public override long Seek(long o, SeekOrigin org)
         {
