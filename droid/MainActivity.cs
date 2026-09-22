@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Sockets;
 using System.Threading.Tasks;
 using Android.App;
 using Android.Content;
@@ -18,6 +19,7 @@ using Google.Android.Material.CheckBox;
 using Google.Android.Material.Color;
 using Google.Android.Material.Dialog;
 using Google.Android.Material.ProgressIndicator;
+using Google.Android.Material.Tabs;
 using Google.Android.Material.TextField;
 using LoopDPI.Core;
 
@@ -27,6 +29,7 @@ namespace PkgSender.Droid;
 public sealed class MainActivity : Activity
 {
     const int PickReq = 1001;
+    const int PickElfReq = 1002;
     const int ServerPort = 9898;
 
     static readonly Color Good = Color.ParseColor("#8FD694");
@@ -58,6 +61,15 @@ public sealed class MainActivity : Activity
         public bool OnMenuItemClick(IMenuItem item) { _a(item.ItemId); return true; }
     }
 
+    sealed class TabHandler : Java.Lang.Object, TabLayout.IOnTabSelectedListener
+    {
+        readonly Action<int> _a;
+        public TabHandler(Action<int> a) { _a = a; }
+        public void OnTabSelected(TabLayout.Tab? tab) { if (tab != null) _a(tab.Position); }
+        public void OnTabUnselected(TabLayout.Tab? tab) { }
+        public void OnTabReselected(TabLayout.Tab? tab) { }
+    }
+
     readonly List<LibItem> _lib = new();
     readonly System.Collections.Concurrent.ConcurrentQueue<string> _logQ = new();
     readonly object _logFileLock = new();
@@ -86,6 +98,12 @@ public sealed class MainActivity : Activity
     LinearProgressIndicator? _prog;
     MaterialButton? _sendBtn;
     MaterialButton? _testBtn;
+    LinearLayout? _injectorWrap;
+    TextInputEditText? _elfPort;
+    TextView? _elfName;
+    TextView? _elfStatus;
+    string? _customElfUri;
+    bool _elfBusy;
     RangeFileServer? _server;
     bool _busy;
     Color _subColor = Color.Gray;
@@ -167,7 +185,30 @@ public sealed class MainActivity : Activity
             if (id == 1) ShowLog();
             else ShowAbout();
         }));
-        lay.AddView(bar);
+        // root: toolbar + tabs + per-tab content
+        var root = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        try { root.SetBackgroundColor(Dyn("colorSurface", Color.White)); } catch { }
+        root.AddView(bar);
+        var tabs = new TabLayout(this);
+        tabs.AddTab(tabs.NewTab()!.SetText("Games"));
+        tabs.AddTab(tabs.NewTab()!.SetText("Injector"));
+        root.AddView(tabs);
+        // lay (built below) becomes the Games tab body
+        lay.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, 0, 1f);
+        root.AddView(lay);
+        _injectorWrap = BuildInjector();
+        _injectorWrap.Visibility = ViewStates.Gone;
+        _injectorWrap.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, 0, 1f);
+        root.AddView(_injectorWrap);
+        tabs.AddOnTabSelectedListener(new TabHandler(pos =>
+        {
+            bool games = pos == 0;
+            lay.Visibility = games ? ViewStates.Visible : ViewStates.Gone;
+            if (_injectorWrap != null)
+                _injectorWrap.Visibility = games ? ViewStates.Gone : ViewStates.Visible;
+        }));
 
         // decode logo once for hero art
         Bitmap? heroLogo = null;
@@ -322,7 +363,7 @@ public sealed class MainActivity : Activity
         scIn.AddView(_statusDetail);
         lay.AddView(_statusCard);
 
-        SetContentView(lay);
+        SetContentView(root);
         RefreshLib();
         // first launch: show About once (support links live there)
         try
@@ -526,6 +567,165 @@ public sealed class MainActivity : Activity
         return l;
     }
 
+    // ---------- ELF injector tab ----------
+
+    LinearLayout BuildInjector()
+    {
+        var wrap = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        wrap.SetPadding(Dp(16), Dp(8), Dp(16), Dp(16));
+        var sc = new ScrollView(this);
+        sc.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.MatchParent);
+        var box = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        sc.AddView(box);
+        wrap.AddView(sc);
+
+        var card = new MaterialCardView(this);
+        card.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        card.Radius = Dp(24);
+        card.CardElevation = Dp(0);
+        try { card.SetCardBackgroundColor(Dyn("colorSurfaceContainer", Color.ParseColor("#F3EDF7"))); } catch { }
+        var ci = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        ci.SetPadding(Dp(20), Dp(20), Dp(20), Dp(20));
+        card.AddView(ci);
+        var t = new TextView(this) { Text = "ELF Injector" };
+        t.TextSize = 20; t.SetTypeface(null, TypefaceStyle.Bold);
+        var d = new TextView(this)
+        {
+            Text = "Streams an ELF straight to the console listener (netcat style).\nBundled: pkg-receiver.elf — run the exploit first, then inject."
+        };
+        d.SetTextColor(_subColor); d.TextSize = 13;
+        var dlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        dlp.TopMargin = Dp(4); dlp.BottomMargin = Dp(12);
+        d.LayoutParameters = dlp;
+        ci.AddView(t); ci.AddView(d);
+
+        // port row
+        var portRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        portRow.SetGravity(GravityFlags.CenterVertical);
+        var portWrap = new TextInputLayout(this, null, MatAttr("textInputOutlinedStyle"));
+        portWrap.Hint = "Port (elfldr default 9020)";
+        portWrap.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        _elfPort = new TextInputEditText(portWrap.Context);
+        _elfPort.InputType = Android.Text.InputTypes.ClassNumber;
+        _elfPort.Text = "9020";
+        portWrap.AddView(_elfPort);
+        portRow.AddView(portWrap);
+        ci.AddView(portRow);
+
+        // elf file row: name + choose
+        var elfRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        var elp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        elp.TopMargin = Dp(12);
+        elfRow.LayoutParameters = elp;
+        elfRow.SetGravity(GravityFlags.CenterVertical);
+        _elfName = new TextView(this) { Text = "pkg-receiver.elf (bundled)" };
+        _elfName.TextSize = 14; _elfName.SetTypeface(null, TypefaceStyle.Bold);
+        _elfName.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        _elfName.SetSingleLine(true); _elfName.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        elfRow.AddView(_elfName);
+        elfRow.AddView(TonalBtn("Choose ELF", PickElfFlow));
+        ci.AddView(elfRow);
+
+        var inj = FilledBtn("Inject ELF", () => _ = InjectElfAsync());
+        inj.CornerRadius = Dp(16);
+        inj.SetMinimumHeight(Dp(56));
+        inj.TextSize = 16;
+        var ijp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        ijp.TopMargin = Dp(16);
+        inj.LayoutParameters = ijp;
+        ci.AddView(inj);
+
+        _elfStatus = new TextView(this) { Text = "idle — exploit first, then Inject" };
+        _elfStatus.SetTextColor(_subColor); _elfStatus.TextSize = 13;
+        var sp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        sp.TopMargin = Dp(10);
+        _elfStatus.LayoutParameters = sp;
+        ci.AddView(_elfStatus);
+
+        box.AddView(card);
+        return wrap;
+    }
+
+    void PickElfFlow()
+    {
+        try
+        {
+            var i = new Intent(Intent.ActionOpenDocument);
+            i.AddCategory(Intent.CategoryOpenable);
+            i.SetType("*/*");
+            i.AddFlags(ActivityFlags.GrantReadUriPermission | ActivityFlags.GrantPersistableUriPermission);
+            StartActivityForResult(Intent.CreateChooser(i, "Pick ELF"), PickElfReq);
+        }
+        catch (Exception ex) { ElfSay(false, "pick failed: " + Short(ex.Message)); }
+    }
+
+    void ElfSay(bool? ok, string s) => RunOnUiThread(() =>
+    {
+        try
+        {
+            if (_elfStatus == null) return;
+            _elfStatus.Text = s;
+            _elfStatus.SetTextColor(ok == true ? Color.ParseColor("#1B7A2E")
+                : ok == false ? Color.ParseColor("#C62828") : _subColor);
+        }
+        catch { }
+    });
+
+    async Task InjectElfAsync()
+    {
+        if (_elfBusy) return;
+        string psIp = (_psIp?.Text ?? "").Trim();
+        if (string.IsNullOrEmpty(psIp)) { ElfSay(false, "type the console IP first (Games tab)"); return; }
+        if (!int.TryParse((_elfPort?.Text ?? "").Trim(), out int port) || port <= 0 || port > 65535)
+        { ElfSay(false, "bad port"); return; }
+        _elfBusy = true;
+        ElfSay(null, $"injecting to {psIp}:{port}…");
+        try
+        {
+            // source: custom file or bundled receiver
+            Stream src;
+            string label;
+            long total = -1;
+            if (!string.IsNullOrEmpty(_customElfUri))
+            {
+                var uri = Android.Net.Uri.Parse(_customElfUri)!;
+                var inp = ContentResolver!.OpenInputStream(uri)
+                    ?? throw new IOException("open ELF failed");
+                src = inp; label = "custom ELF"; total = -1;
+            }
+            else
+            {
+                var emb = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.pkg-receiver.elf")
+                    ?? throw new IOException("bundled ELF missing");
+                src = emb; label = "pkg-receiver.elf";
+                try { total = emb.Length; } catch { }
+            }
+            long sent = 0;
+            using (src)
+            using (var cli = new TcpClient())
+            {
+                using var cts = new System.Threading.CancellationTokenSource(10000);
+                await cli.ConnectAsync(psIp, port, cts.Token);
+                using var net = cli.GetStream();
+                var buf = new byte[65536];
+                int r;
+                while ((r = await src.ReadAsync(buf, 0, buf.Length)) > 0)
+                {
+                    await net.WriteAsync(buf, 0, r);
+                    sent += r;
+                    long s2 = sent;
+                    RunOnUiThread(() => { if (_elfStatus != null) _elfStatus.Text = $"sending… {s2 / 1024} KB"; });
+                }
+                await net.FlushAsync();
+            }
+            ElfSay(true, $"sent {sent / 1024} KB {label} to {psIp}:{port} — watch the console.");
+        }
+        catch (Exception ex) { ElfSay(false, "inject failed: " + Short(ex.Message)); }
+        finally { _elfBusy = false; }
+    }
+
     // ---------- library ----------
 
     void PickFlow()
@@ -546,6 +746,22 @@ public sealed class MainActivity : Activity
     protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
     {
         base.OnActivityResult(requestCode, resultCode, data);
+        if (requestCode == PickElfReq)
+        {
+            if (resultCode != Result.Ok || data?.Data == null) return;
+            var u = data.Data;
+            try
+            {
+                ContentResolver!.TakePersistableUriPermission(u,
+                    ActivityFlags.GrantReadUriPermission);
+            }
+            catch { }
+            _customElfUri = u.ToString();
+            string name = u.LastPathSegment ?? "custom ELF";
+            RunOnUiThread(() => { if (_elfName != null) _elfName.Text = name; });
+            ElfSay(null, "custom ELF staged — Inject to send");
+            return;
+        }
         if (requestCode != PickReq || resultCode != Result.Ok || data == null) return;
         var uris = new List<Android.Net.Uri>();
         if (data.ClipData != null)
