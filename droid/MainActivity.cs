@@ -54,6 +54,10 @@ public sealed class MainActivity : Activity
         _sendBtn.Click += (_, _) => _ = SendAsync();
         lay.AddView(_sendBtn);
 
+        var testBtn = new Button(this) { Text = "Test connection" };
+        testBtn.Click += (_, _) => _ = TestAsync();
+        lay.AddView(testBtn);
+
         _status = new TextView(this) { Text = "idle" };
         lay.AddView(_status);
 
@@ -141,6 +145,57 @@ public sealed class MainActivity : Activity
 
     void Say(string s) => RunOnUiThread(() => _status!.Text = s);
     static string Short(string s) => s.Length > 140 ? s[..140] : s;
+
+    async Task TestAsync()
+    {
+        string psIp = (_psIp?.Text ?? "").Trim();
+        if (string.IsNullOrEmpty(psIp)) { Say("type the console IP first"); return; }
+        GetPreferences(FileCreationMode.Private).Edit().PutString("psip", psIp).Apply();
+        try
+        {
+            Say("probing console (12800/9090)…");
+            string mode = await Ps4Installer.DetectAsync(psIp);
+            var nets = await Task.Run(() => NetDiscovery.GetLanNetworks());
+            string pcIp = NetDiscovery.BestPcIpFor(nets, psIp) ?? "0.0.0.0";
+            if (mode == "offline")
+            {
+                Say($"console OFFLINE on {psIp} — enable RPI or GoldHEN Server. phone={pcIp} (same Wi-Fi?)");
+                return;
+            }
+            // prove the phone can actually serve: start the real file
+            // server and fetch back over loopback, then free the port.
+            string serve;
+            RangeFileServer? probe = null;
+            try
+            {
+                if (!string.IsNullOrEmpty(_localPath) && File.Exists(_localPath))
+                {
+                    probe = new RangeFileServer(
+                        new Dictionary<string, string> { ["pkg"] = _localPath }, ServerPort);
+                    probe.Start();
+                    string url = probe.UrlFor("127.0.0.1", "pkg");
+                    using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromSeconds(10) };
+                    using var resp = await http.GetAsync(url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
+                    long? len = resp.Content.Headers.ContentLength;
+                    serve = resp.IsSuccessStatusCode ? $"server OK{(len > 0 ? $" ({len / 1048576} MB)" : "")}" : "server HTTP " + (int)resp.StatusCode;
+                }
+                else
+                {
+                    var tl = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, ServerPort);
+                    try
+                    {
+                        tl.Start();
+                        serve = $"port {ServerPort} free (pick a file to test serving)";
+                    }
+                    finally { try { tl.Stop(); } catch { } }
+                }
+            }
+            catch (Exception ex) { serve = "server FAILED: " + Short(ex.Message); }
+            finally { try { probe?.Dispose(); } catch { } }
+            Say($"console={mode} phone={pcIp} {serve}");
+        }
+        catch (Exception ex) { Say("test error: " + Short(ex.Message)); }
+    }
 
     protected override void OnDestroy()
     {
