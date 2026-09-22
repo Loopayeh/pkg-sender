@@ -144,31 +144,16 @@ public sealed class MainActivity : Activity
         _subColor = Dyn("colorOnSurfaceVariant", Color.Gray);
 
         var lay = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        try { lay.SetBackgroundColor(Dyn("colorSurface", Color.White)); } catch { }
         int pad = Dp(16);
         lay.SetPadding(pad, 0, pad, pad);
 
         var bar = new MaterialToolbar(this);
         bar.Title = "PKG Sender";
-        bar.Subtitle = "PS4 / PS5 over LAN";
         try
         {
-            bar.SetBackgroundColor(Dyn("colorSurfaceContainer", Color.Transparent));
+            bar.SetBackgroundColor(Color.Transparent);
             bar.SetTitleTextColor(Dyn("colorOnSurface", Color.Black));
-            bar.SetSubtitleTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
-        }
-        catch { }
-        try
-        {
-            using var s = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.logo.png");
-            if (s != null)
-                using (var bmp = BitmapFactory.DecodeStream(s))
-                    if (bmp != null)
-                    {
-                        // 1024px logo -> small 40dp toolbar mark
-                        int sz = Dp(40);
-                        using var scaled = Bitmap.CreateScaledBitmap(bmp, sz, sz, true);
-                        bar.Logo = new BitmapDrawable(Resources, scaled);
-                    }
         }
         catch { }
         bar.Menu.Add(0, 1, 0, "Log");
@@ -180,11 +165,67 @@ public sealed class MainActivity : Activity
         }));
         lay.AddView(bar);
 
+        // decode logo once for hero art
+        Bitmap? heroLogo = null;
+        try
+        {
+            using var s = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.logo.png");
+            if (s != null)
+                using (var bmp = BitmapFactory.DecodeStream(s))
+                    if (bmp != null)
+                        heroLogo = Bitmap.CreateScaledBitmap(bmp, Dp(56), Dp(56), true);
+        }
+        catch { }
+
+        // hero: app identity + console connection in one surface card
+        var hero = new MaterialCardView(this);
+        var hlp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        hlp.TopMargin = Dp(8);
+        hero.LayoutParameters = hlp;
+        hero.Radius = Dp(24);
+        hero.CardElevation = Dp(0);
+        try { hero.SetCardBackgroundColor(Dyn("colorSurfaceContainer", Color.ParseColor("#F3EDF7"))); } catch { }
+        var heroIn = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        heroIn.SetPadding(Dp(20), Dp(20), Dp(20), Dp(20));
+        hero.AddView(heroIn);
+
+        var heroRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        heroRow.SetGravity(GravityFlags.CenterVertical);
+        var heroImg = new ImageView(this);
+        heroImg.LayoutParameters = new LinearLayout.LayoutParams(Dp(56), Dp(56));
+        if (heroLogo != null) heroImg.SetImageBitmap(heroLogo);
+        else heroImg.SetImageResource(Android.Resource.Drawable.IcMenuGallery);
+        heroImg.SetScaleType(ImageView.ScaleType.CenterCrop);
+        try
+        {
+            var hrd = new GradientDrawable();
+            hrd.SetCornerRadius(Dp(16));
+            hrd.SetColor(Android.Graphics.Color.Transparent);
+            heroImg.SetBackgroundDrawable(hrd);
+            heroImg.ClipToOutline = true;
+        }
+        catch { }
+        heroRow.AddView(heroImg);
+        var heroTxt = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        var htp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        htp.LeftMargin = Dp(16);
+        heroTxt.LayoutParameters = htp;
+        var heroTitle = new TextView(this) { Text = "PKG Sender" };
+        heroTitle.TextSize = 22; heroTitle.SetTypeface(null, TypefaceStyle.Bold);
+        try { heroTitle.SetTextColor(Dyn("colorOnSurface", Color.Black)); } catch { }
+        var heroSub = new TextView(this) { Text = "PS4 / PS5 packages over LAN" };
+        heroSub.TextSize = 14;
+        heroSub.SetTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
+        heroTxt.AddView(heroTitle); heroTxt.AddView(heroSub);
+        heroRow.AddView(heroTxt);
+        heroIn.AddView(heroRow);
+
         // console row: outlined IP + tonal test
         var ipRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         var ipp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        ipp.TopMargin = Dp(4);
+        ipp.TopMargin = Dp(16);
         ipRow.LayoutParameters = ipp;
         var ipWrap = new TextInputLayout(this, null, MatAttr("textInputOutlinedStyle"));
         ipWrap.Hint = "Console IP, e.g. 192.168.1.105";
@@ -202,7 +243,8 @@ public sealed class MainActivity : Activity
         tbp.Gravity = GravityFlags.CenterVertical;
         _testBtn.LayoutParameters = tbp;
         ipRow.AddView(_testBtn);
-        lay.AddView(ipRow);
+        heroIn.AddView(ipRow);
+        lay.AddView(hero);
 
         // library header + add
         var libRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
@@ -211,10 +253,13 @@ public sealed class MainActivity : Activity
         llp.TopMargin = Dp(16);
         libRow.LayoutParameters = llp;
         _libHead = new TextView(this) { Text = "Library (0)" };
-        _libHead.TextSize = 18; _libHead.SetTypeface(null, TypefaceStyle.Bold);
+        _libHead.TextSize = 20; _libHead.SetTypeface(null, TypefaceStyle.Bold);
+        try { _libHead.SetTextColor(Dyn("colorOnSurface", Color.Black)); } catch { }
         _libHead.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         libRow.AddView(_libHead);
-        libRow.AddView(TonalBtn("+ Add PKG", PickFlow));
+        var addBtn = FilledBtn("+ Add PKG", PickFlow);
+        addBtn.CornerRadius = Dp(16);
+        libRow.AddView(addBtn);
         lay.AddView(libRow);
 
         // scrolling library
@@ -227,6 +272,9 @@ public sealed class MainActivity : Activity
 
         // send + progress + status
         _sendBtn = FilledBtn("Send queue", () => _ = SendQueueAsync());
+        _sendBtn.CornerRadius = Dp(16);
+        _sendBtn.SetMinimumHeight(Dp(56));
+        _sendBtn.TextSize = 16;
         var sbp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         sbp.TopMargin = Dp(12);
         _sendBtn.LayoutParameters = sbp;
@@ -708,24 +756,28 @@ public sealed class MainActivity : Activity
         var cp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         cp.TopMargin = Dp(6); cp.BottomMargin = Dp(6);
         card.LayoutParameters = cp;
-        card.Radius = Dp(16);
-        card.CardElevation = Dp(1);
+        card.Radius = Dp(20);
+        card.CardElevation = Dp(0);
         try
         {
             card.StrokeWidth = Dp(1);
             card.StrokeColor = Dyn("colorOutlineVariant", Color.ParseColor("#E0E0E0"));
+            card.SetCardBackgroundColor(Dyn("colorSurfaceContainerLow", Color.White));
             if (it.Queued)
+            {
                 card.StrokeColor = Dyn("colorPrimary", Color.ParseColor("#6750A4"));
+                card.SetCardBackgroundColor(Dyn("colorPrimaryContainer", Color.White));
+            }
         }
         catch { }
 
         var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         row.SetGravity(GravityFlags.CenterVertical);
-        row.SetPadding(Dp(12), Dp(12), Dp(12), Dp(12));
+        row.SetPadding(Dp(14), Dp(14), Dp(14), Dp(14));
         card.AddView(row);
 
         var img = new ImageView(this);
-        var ilp = new LinearLayout.LayoutParams(Dp(56), Dp(56));
+        var ilp = new LinearLayout.LayoutParams(Dp(60), Dp(60));
         ilp.RightMargin = Dp(12);
         img.LayoutParameters = ilp;
         img.SetScaleType(ImageView.ScaleType.CenterCrop);
@@ -772,6 +824,23 @@ public sealed class MainActivity : Activity
         cb.CheckedChange += (_, e) =>
         {
             it.Queued = e.IsChecked;
+            try
+            {
+                if (it.Row != null)
+                {
+                    if (it.Queued)
+                    {
+                        it.Row.StrokeColor = Dyn("colorPrimary", Color.ParseColor("#6750A4"));
+                        it.Row.SetCardBackgroundColor(Dyn("colorPrimaryContainer", Color.White));
+                    }
+                    else
+                    {
+                        it.Row.StrokeColor = Dyn("colorOutlineVariant", Color.ParseColor("#E0E0E0"));
+                        it.Row.SetCardBackgroundColor(Dyn("colorSurfaceContainerLow", Color.White));
+                    }
+                }
+            }
+            catch { }
             RefreshSendLabel();
         };
         row.AddView(cb);
