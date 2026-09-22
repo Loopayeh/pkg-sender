@@ -20,6 +20,7 @@
  *   POST /api/files/mkdir  {"path":..}    - mkdir -p under /data/homebrew
  *   POST /api/files/write?path=..&offset= - raw chunk append
  *   POST /api/files/done   {"path":..,"size":N} - verify + toast
+ *   POST /api/files/rename {"from":..,"to":..} - rename in /data/homebrew
  *   Files tab + /api/fs/... : TEMP-DISABLED (see ENABLE_FILES_TAB;
  *   backup: main.c.with-files-tab.bak)
  *   UDP beacon: "PKGSENDER v1" broadcast to 255.255.255.255:12801 every 3s
@@ -194,7 +195,7 @@ installer_init(void)
 #ifndef TEST_ONLY
 #define LAUNCHER_TID "PKGS12800"
 /* bump on every behavior change; the page shows receiver vs page tags */
-#define RECEIVER_BUILD "20260921-03"
+#define RECEIVER_BUILD "20260922-rename01"
 
 __asm__(
 ".section .rodata\n"
@@ -2445,6 +2446,27 @@ handle_client(int fd)
 			snprintf(toast, sizeof(toast),
 			    "Loopayeh: received %s", base);
 			notify_user(toast);
+		}
+	} else if (!strcmp(method, "POST") &&
+	           !strncmp(path, "/api/files/rename", 17)) {
+		/* rename inside /data/homebrew: pull to a .part temp name so
+		 * on-console watchers never see (and mount) a partial file,
+		 * then atomically rename to the real name when verified. */
+		char rfrom[PATH_MAX_V], rto[PATH_MAX_V];
+		char lfrom[PATH_MAX_V], lto[PATH_MAX_V];
+		struct stat st;
+
+		if (!json_string(body, "from", rfrom, sizeof(rfrom)) ||
+		    !json_string(body, "to", rto, sizeof(rto)) ||
+		    jail_path(rfrom, lfrom, sizeof(lfrom)) != 0 ||
+		    jail_path(rto, lto, sizeof(lto)) != 0) {
+			send_text(fd, "error:bad path");
+		} else if (stat(lfrom, &st) != 0 || S_ISDIR(st.st_mode)) {
+			send_text(fd, "error:not found");
+		} else if (rename(lfrom, lto) != 0) {
+			send_text(fd, "error:rename failed");
+		} else {
+			send_json(fd, "{\"ok\":true}");
 		}
 #ifdef ENABLE_FILES_TAB
 	} else if (!strcmp(method, "POST") &&

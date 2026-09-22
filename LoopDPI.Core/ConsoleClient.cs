@@ -101,6 +101,32 @@ public static class ConsoleClient
     }
 
     /// <summary>
+    /// Rename a file inside /data/homebrew. Used to hide in-progress
+    /// pull copies under a .part temp name (on-console watchers must
+    /// never see/mount a partial image) and reveal the real name on
+    /// verify. Needs the matching receiver build.
+    /// </summary>
+    public static async Task<(bool Ok, string Reply)> RenameAsync(string psIp, string from, string to)
+    {
+        string json = $"{{\"from\":\"{JsonEscape(from)}\",\"to\":\"{JsonEscape(to)}\"}}";
+        string? body = null;
+        try
+        {
+            using var c = NewClient(10);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var resp = await c.PostAsync($"http://{psIp}:12800/api/files/rename", content);
+            body = await resp.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+        if (body == null)
+            return (false, "no reply on 12800");
+        return (body.Contains("\"ok\""), body);
+    }
+
+    /// <summary>
     /// Ask the receiver to pull a PC file into /data/homebrew itself
     /// (Images tab copy, now also from the PC app). The PC file server
     /// must serve the URL (/pkg/{id} covers every registered file).
