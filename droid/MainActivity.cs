@@ -53,12 +53,22 @@ public sealed class MainActivity : Activity
 
     sealed class MenuHandler : Java.Lang.Object, MaterialToolbar.IOnMenuItemClickListener
     {
-        readonly Action _a;
-        public MenuHandler(Action a) { _a = a; }
-        public bool OnMenuItemClick(IMenuItem item) { _a(); return true; }
+        readonly Action<int> _a;
+        public MenuHandler(Action<int> a) { _a = a; }
+        public bool OnMenuItemClick(IMenuItem item) { _a(item.ItemId); return true; }
     }
 
     readonly List<LibItem> _lib = new();
+    readonly System.Collections.Concurrent.ConcurrentQueue<string> _logQ = new();
+    void AddLog(string s)
+    {
+        try
+        {
+            _logQ.Enqueue(DateTime.Now.ToString("HH:mm:ss") + " " + s);
+            while (_logQ.Count > 300 && _logQ.TryDequeue(out _)) { }
+        }
+        catch { }
+    }
     TextInputEditText? _psIp;
     LinearLayout? _libBox;
     TextView? _libHead;
@@ -119,8 +129,13 @@ public sealed class MainActivity : Activity
                         bar.Logo = new BitmapDrawable(Resources, bmp);
         }
         catch { }
-        bar.Menu.Add(0, 1, 0, "About");
-        bar.SetOnMenuItemClickListener(new MenuHandler(ShowAbout));
+        bar.Menu.Add(0, 1, 0, "Log");
+        bar.Menu.Add(0, 2, 0, "About");
+        bar.SetOnMenuItemClickListener(new MenuHandler(id =>
+        {
+            if (id == 1) ShowLog();
+            else ShowAbout();
+        }));
         lay.AddView(bar);
 
         // console row: outlined IP + tonal test
@@ -191,6 +206,29 @@ public sealed class MainActivity : Activity
 
         SetContentView(lay);
         RefreshLib();
+    }
+
+    void ShowLog()
+    {
+        var dlg = new BottomSheetDialog(this);
+        var v = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        int pad = Dp(20);
+        v.SetPadding(pad, pad, pad, pad);
+        var t = new TextView(this) { Text = "Transfer log (copy to me if a send fails)" };
+        t.TextSize = 16; t.SetTypeface(null, TypefaceStyle.Bold);
+        var sv = new ScrollView(this);
+        var slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, Dp(320));
+        slp.TopMargin = Dp(8); slp.BottomMargin = Dp(12);
+        sv.LayoutParameters = slp;
+        var body = new TextView(this) { Text = string.Join("\n", _logQ.ToArray()) };
+        body.SetTextIsSelectable(true);
+        body.Typeface = Android.Graphics.Typeface.Monospace;
+        body.TextSize = 11;
+        sv.AddView(body);
+        var close = FilledBtn("Close", () => dlg.Dismiss());
+        v.AddView(t); v.AddView(sv); v.AddView(close);
+        dlg.SetContentView(v);
+        dlg.Show();
     }
 
     void ShowAbout()
@@ -826,6 +864,7 @@ public sealed class MainActivity : Activity
     RangeFileServer BuildServerFor(LibItem it)
     {
         var server = new RangeFileServer(new Dictionary<string, string>(), ServerPort);
+        server.RequestLog = line => AddLog(line);
         if (it.Direct && it.UriStr != null)
             server.RegisterSource("pkg", new SafRangeSource(ContentResolver!,
                 Android.Net.Uri.Parse(it.UriStr)!, it.Size));
@@ -889,6 +928,7 @@ public sealed class MainActivity : Activity
                 string remote = "/data/homebrew/" + it.FileName;
                 for (int attempt = 1; attempt <= 6; attempt++)
                 {
+                    AddLog($"pull try {attempt}/6 {it.FileName} size={it.Size} resume=true");
                     if (attempt > 1)
                         Say($"retrying copy from {SizeStr(Math.Min(it.Size, LastPullGot))}… ({attempt}/6)");
                     else

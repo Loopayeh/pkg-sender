@@ -424,15 +424,21 @@ public sealed class RangeFileServer : IDisposable
                     int want = (int)Math.Min(buf.Length, length);
                     int got = await fs.ReadAsync(buf.AsMemory(0, want), ct);
                     if (got == 0)
+                    {
+                        Log($"pkg EOF@{start + (end - start + 1 - length)}");
                         break;
+                    }
                     await ns.WriteAsync(buf.AsMemory(0, got), ct);
                     length -= got;
                     Progress?.Invoke(Interlocked.Add(ref _served, got), size);
                     _servedById.AddOrUpdate(id, got, (_, v) => v + got);
                 }
+                if (length > 0)
+                    Log($"pkg short@{start} left={length}");
             }
-            catch
+            catch (Exception ex)
             {
+                Log($"pkg ERR@{start} {ex.GetType().Name}: {ex.Message}");
             }
         }
     }
