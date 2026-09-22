@@ -60,12 +60,16 @@ public sealed class MainActivity : Activity
 
     readonly List<LibItem> _lib = new();
     readonly System.Collections.Concurrent.ConcurrentQueue<string> _logQ = new();
+    string _logPath = "";
     void AddLog(string s)
     {
         try
         {
-            _logQ.Enqueue(DateTime.Now.ToString("HH:mm:ss") + " " + s);
+            string line = DateTime.Now.ToString("HH:mm:ss") + " " + s;
+            _logQ.Enqueue(line);
             while (_logQ.Count > 300 && _logQ.TryDequeue(out _)) { }
+            if (!string.IsNullOrEmpty(_logPath))
+                File.AppendAllText(_logPath, line + "\n");
         }
         catch { }
     }
@@ -78,7 +82,6 @@ public sealed class MainActivity : Activity
     MaterialButton? _testBtn;
     RangeFileServer? _server;
     bool _busy;
-    bool _renameOk = true; // false after first failed rename (old receiver)
     Color _subColor = Color.Gray;
 
     int Dp(int dp) => (int)(dp * Resources!.DisplayMetrics!.Density);
@@ -112,6 +115,20 @@ public sealed class MainActivity : Activity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        try
+        {
+            _logPath = System.IO.Path.Combine(CacheDir!.AbsolutePath, "pkgsender.log");
+            File.AppendAllText(_logPath, $"--- start {DateTime.Now} ---\n");
+            AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            {
+                try { File.AppendAllText(_logPath, $"CRASH {DateTime.Now}: {e.ExceptionObject}\n"); } catch { }
+            };
+            Android.Runtime.AndroidEnvironment.UnhandledExceptionRaiser += (_, e) =>
+            {
+                try { File.AppendAllText(_logPath, $"ANDROID-CRASH {DateTime.Now}: {e.Exception}\n"); } catch { }
+            };
+        }
+        catch { }
         _subColor = Dyn("colorOnSurfaceVariant", Color.Gray);
 
         var lay = new LinearLayout(this) { Orientation = Orientation.Vertical };
@@ -221,7 +238,7 @@ public sealed class MainActivity : Activity
         var slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, Dp(320));
         slp.TopMargin = Dp(8); slp.BottomMargin = Dp(12);
         sv.LayoutParameters = slp;
-        var body = new TextView(this) { Text = string.Join("\n", _logQ.ToArray()) };
+        var body = new TextView(this) { Text = ReadLogTail() };
         body.SetTextIsSelectable(true);
         body.Typeface = Android.Graphics.Typeface.Monospace;
         body.TextSize = 11;
@@ -230,6 +247,21 @@ public sealed class MainActivity : Activity
         v.AddView(t); v.AddView(sv); v.AddView(close);
         dlg.SetContentView(v);
         dlg.Show();
+    }
+
+    string ReadLogTail()
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(_logPath) && File.Exists(_logPath))
+            {
+                var lines = File.ReadAllLines(_logPath);
+                int from = Math.Max(0, lines.Length - 150);
+                return string.Join("\n", lines.Skip(from));
+            }
+        }
+        catch { }
+        return string.Join("\n", _logQ.ToArray());
     }
 
     void ShowAbout()
@@ -949,50 +981,28 @@ public sealed class MainActivity : Activity
             // disc images go to /data/homebrew via receiver pull, not install.
             // Poll the receiver's pull status so the phone shows live progress.
             // The receiver has no segment retry: re-pull resumes partials.
-            // Pull to a .part temp first: on-console watchers must never see
-            // (and mount) a partial image; rename to real name on verify.
             if (it.Format != "pkg")
             {
                 string remote = "/data/homebrew/" + it.FileName;
-                string temp = remote + ".part";
                 for (int attempt = 1; attempt <= 6; attempt++)
                 {
-                    string target = _renameOk ? temp : remote;
-                    AddLog($"pull try {attempt}/6 {it.FileName} -> {target} size={it.Size} resume=true");
+                    AddLog($"pull try {attempt}/6 {it.FileName} size={it.Size} resume=true");
                     if (attempt > 1)
                         Say($"retrying copy from {SizeStr(Math.Min(it.Size, LastPullGot))}… ({attempt}/6)");
                     else
                         Say($"copying {it.FileName} to console…");
-                    var (pok, preply) = await ConsoleClient.PullAsync(psIp, url, target, resume: true);
+                    var (pok, preply) = await ConsoleClient.PullAsync(psIp, url, remote, resume: true);
                     if (!pok)
                     {
                         SetState(it, "failed");
                         Say($"copy failed: {Short(preply)}");
                         return false;
                     }
-                    if (!await TrackPullAsync(psIp, target, it))
-                        continue; // retry resumes the partial
-                    if (!_renameOk)
+                    if (await TrackPullAsync(psIp, remote, it))
                     {
                         SetState(it, "done");
                         return true;
                     }
-                    var (rok, rreply) = await ConsoleClient.RenameAsync(psIp, temp, remote);
-                    if (rok)
-                    {
-                        var (exists, size) = await ConsoleClient.StatAsync(psIp, remote);
-                        if (exists && size == it.Size)
-                        {
-                            SetState(it, "done");
-                            return true;
-                        }
-                        SetState(it, "failed");
-                        Say($"rename verify failed ({size}/{it.Size})");
-                        return false;
-                    }
-                    // old receiver without rename: straight to final name
-                    _renameOk = false;
-                    Say("old receiver: copying straight to final name…");
                 }
                 SetState(it, "failed");
                 Say("copy stalled after 6 tries — check console space/Wi-Fi");
