@@ -316,7 +316,7 @@ public static class ExfatReader
 
     private sealed class Fs
     {
-        public FileStream F = null!;
+        public Stream F = null!;
         public int SectorSize;
         public int ClusterSectors;
         public long FatBase;
@@ -328,28 +328,26 @@ public static class ExfatReader
         try
         {
             using var fs = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            var v = new Fs { F = fs };
-            Span<byte> vbr = stackalloc byte[512];
-            fs.Position = 0;
-            if (fs.Read(vbr) != 512)
-                return null;
-            if (Encoding.ASCII.GetString(vbr.Slice(3, 8)) != "EXFAT   ")
+            long size = 0;
+            try { size = fs.Length; } catch { }
+            return Read(fs, path, size);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Parse an exFAT image from any seekable stream (phone SAF included).</summary>
+    public static PkgInfo? Read(Stream input, string nameForIds, long size)
+    {
+        try
+        {
+            var v = OpenFs(input);
+            if (v == null)
                 return null;
 
-            ulong partOff = RdU64(vbr, 0x40);
-            uint fatOff = RdU32(vbr, 0x50);
-            uint heapOff = RdU32(vbr, 0x58);
-            uint rootCluster = RdU32(vbr, 0x60);
-            int sectorShift = vbr[0x6C];
-            int clusterShift = vbr[0x6D];
-            if (sectorShift < 9 || sectorShift > 12 || clusterShift > 25)
-                return null;
-            v.SectorSize = 1 << sectorShift;
-            v.ClusterSectors = 1 << clusterShift;
-            v.FatBase = (long)((partOff + fatOff) * (ulong)v.SectorSize);
-            v.HeapBase = (long)((partOff + heapOff) * (ulong)v.SectorSize);
-
-            var sce = FindDir(v, rootCluster, "sce_sys");
+            var sce = FindDir(v, ReadRoot(v), "sce_sys");
             if (sce == null)
                 return null;
             var pj = FindFile(v, sce.Value.Cluster, sce.Value.Contiguous, "param.json");
@@ -369,19 +367,11 @@ public static class ExfatReader
                     icon = b;
             }
 
-            long size = 0;
-            try
-            {
-                size = new FileInfo(path).Length;
-            }
-            catch
-            {
-            }
             string tid = meta.TitleId;
             if (string.IsNullOrEmpty(tid))
-                tid = GameReader.TitleIdFromName(path);
+                tid = GameReader.TitleIdFromName(nameForIds);
             string title = string.IsNullOrEmpty(meta.Title)
-                ? (string.IsNullOrEmpty(tid) ? Path.GetFileName(path) : tid)
+                ? (string.IsNullOrEmpty(tid) ? Path.GetFileName(nameForIds) : tid)
                 : meta.Title;
 
             var pars = new List<PkgParam>();
@@ -472,7 +462,7 @@ public static class ExfatReader
         return RdU32(vbr, 0x60);
     }
 
-    private static Fs? OpenFs(FileStream fs)
+    private static Fs? OpenFs(Stream fs)
     {
         var v = new Fs { F = fs };
         Span<byte> vbr = stackalloc byte[512];

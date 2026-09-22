@@ -483,6 +483,17 @@ public sealed class MainActivity : Activity
                     }
                     catch (Exception ex) { parseErr = ex.Message; }
                 }
+                else
+                {
+                    try
+                    {
+                        // exFAT image: walk the FS straight on the document.
+                        var (ch2, fin2, pfd2) = OpenChannelAt(ContentResolver!, uri, 0);
+                        using (var ss2 = new SafStream(ch2, fin2, pfd2, total, 0))
+                            hpkg = ExfatReader.Read(ss2, name, total);
+                    }
+                    catch (Exception ex) { parseErr = ex.Message; }
+                }
                 bool usable = hpkg != null
                     && (!string.IsNullOrEmpty(hpkg.Title) || !string.IsNullOrEmpty(hpkg.TitleId));
                 if (usable || isImage)
