@@ -245,7 +245,27 @@ public sealed class MainActivity : Activity
         });
     }
 
-    const long HeaderPrefetch = 128L << 20;
+    static (Java.Nio.Channels.FileChannel Ch, Java.IO.FileInputStream Fin,
+        Android.OS.ParcelFileDescriptor Pfd) OpenChannelAt(
+        ContentResolver cr, Android.Net.Uri uri, long offset)
+    {
+        var pfd = cr.OpenFileDescriptor(uri, "r")
+            ?? throw new IOException("open fd failed");
+        Java.IO.FileInputStream? fin = null;
+        try
+        {
+            fin = new Java.IO.FileInputStream(pfd.FileDescriptor);
+            var ch = fin.Channel ?? throw new IOException("no channel");
+            ch.Position(offset); // lseek; throws on pipes
+            return (ch, fin, pfd);
+        }
+        catch
+        {
+            try { fin?.Close(); } catch { }
+            try { pfd.Close(); } catch { }
+            throw;
+        }
+    }
 
     /// <summary>Seekable SAF document served straight to the console, no copy.</summary>
     sealed class SafRangeSource : LoopDPI.Core.IRangeSource
@@ -257,42 +277,31 @@ public sealed class MainActivity : Activity
         { _cr = cr; _uri = uri; Length = len; }
         public Stream OpenAt(long offset)
         {
-            var pfd = _cr.OpenFileDescriptor(_uri, "r")
-                ?? throw new IOException("open fd failed");
-            Java.IO.FileInputStream? fin = null;
-            try
-            {
-                fin = new Java.IO.FileInputStream(pfd.FileDescriptor);
-                var ch = fin.Channel
-                    ?? throw new IOException("no channel");
-                ch.Position(offset); // lseek; throws on pipes
-                return new ChannelStream(ch, fin, pfd);
-            }
-            catch
-            {
-                try { fin?.Close(); } catch { }
-                try { pfd.Close(); } catch { }
-                throw;
-            }
+            var (ch, fin, pfd) = OpenChannelAt(_cr, _uri, offset);
+            return new SafStream(ch, fin, pfd, Length, offset);
         }
     }
 
-    sealed class ChannelStream : Stream
+    /// <summary>Seekable read stream over a SAF file channel (parse + serve).</summary>
+    sealed class SafStream : Stream
     {
         readonly Java.Nio.Channels.FileChannel _ch;
         readonly Java.IO.FileInputStream _fin;
         readonly Android.OS.ParcelFileDescriptor _pfd;
-        public ChannelStream(Java.Nio.Channels.FileChannel ch,
-            Java.IO.FileInputStream fin, Android.OS.ParcelFileDescriptor pfd)
-        { _ch = ch; _fin = fin; _pfd = pfd; }
+        readonly long _len;
+        long _pos;
+        public SafStream(Java.Nio.Channels.FileChannel ch,
+            Java.IO.FileInputStream fin, Android.OS.ParcelFileDescriptor pfd,
+            long len, long pos)
+        { _ch = ch; _fin = fin; _pfd = pfd; _len = len; _pos = pos; }
         public override bool CanRead => true;
-        public override bool CanSeek => false;
+        public override bool CanSeek => true;
         public override bool CanWrite => false;
-        public override long Length => throw new NotSupportedException();
+        public override long Length => _len;
         public override long Position
         {
-            get => throw new NotSupportedException();
-            set => throw new NotSupportedException();
+            get => _pos;
+            set => Seek(value, SeekOrigin.Begin);
         }
         public override void Flush() { }
         public override int Read(byte[] buffer, int offset, int count)
@@ -302,9 +311,22 @@ public sealed class MainActivity : Activity
             if (n <= 0) return n;
             bb.Flip();
             bb.Get(buffer, offset, n);
+            _pos += n;
             return n;
         }
-        public override long Seek(long o, SeekOrigin org) => throw new NotSupportedException();
+        public override long Seek(long o, SeekOrigin org)
+        {
+            long t = org switch
+            {
+                SeekOrigin.Begin => o,
+                SeekOrigin.Current => _pos + o,
+                SeekOrigin.End => _len + o,
+                _ => throw new ArgumentOutOfRangeException(nameof(org)),
+            };
+            _ch.Position(t);
+            _pos = t;
+            return _pos;
+        }
         public override void SetLength(long v) => throw new NotSupportedException();
         public override void Write(byte[] b, int o, int c) => throw new NotSupportedException();
         protected override void Dispose(bool disposing)
@@ -323,14 +345,10 @@ public sealed class MainActivity : Activity
     {
         try
         {
-            using var pfd = cr.OpenFileDescriptor(uri, "r");
-            if (pfd?.FileDescriptor == null || !pfd.FileDescriptor.Valid())
-                return false;
-            using var fin = new Java.IO.FileInputStream(pfd.FileDescriptor);
-            var ch = fin.Channel;
-            if (ch == null) return false;
-            ch.Position(1); // probe lseek; pipes throw here
-            ch.Close();
+            var (ch, fin, pfd) = OpenChannelAt(cr, uri, 1);
+            try { ch.Close(); } catch { }
+            try { fin.Close(); } catch { }
+            try { pfd.Close(); } catch { }
             return true;
         }
         catch { return false; }
@@ -378,25 +396,18 @@ public sealed class MainActivity : Activity
             {
                 Say($"reading header {name}…");
                 PkgInfo? hpkg = null;
+                string parseErr = "";
                 if (!isImage)
                 {
                     try
                     {
-                        using var src = ContentResolver!.OpenInputStream(uri)!;
-                        using var ms = new MemoryStream();
-                        var buf = new byte[1 << 20];
-                        long want = Math.Min(total, HeaderPrefetch);
-                        long got = 0;
-                        int n;
-                        while (got < want && (n = await src.ReadAsync(buf, 0, (int)Math.Min(buf.Length, want - got))) > 0)
-                        {
-                            ms.Write(buf, 0, n);
-                            got += n;
-                        }
-                        ms.Position = 0;
-                        hpkg = PkgReader.Read(ms);
+                        // seekable parse straight on the document: only the
+                        // header/table/param/icon offsets are read, no copy.
+                        var (ch, fin, pfd) = OpenChannelAt(ContentResolver!, uri, 0);
+                        using (var ss = new SafStream(ch, fin, pfd, total, 0))
+                            hpkg = PkgReader.Read(ss);
                     }
-                    catch { }
+                    catch (Exception ex) { parseErr = ex.Message; }
                 }
                 bool usable = hpkg != null
                     && (!string.IsNullOrEmpty(hpkg.Title) || !string.IsNullOrEmpty(hpkg.TitleId));
@@ -425,8 +436,8 @@ public sealed class MainActivity : Activity
                     }
                     return (true, "");
                 }
-                // header parse missed (icon past prefetch etc.) -> copy fallback below
-                Say($"direct parse missed, copying {name}…");
+                // header parse missed -> copy fallback below
+                Say($"direct parse missed{(parseErr.Length > 0 ? ": " + Short(parseErr) : "")}, copying {name}…");
             }
 
             string dest = System.IO.Path.Combine(CacheDir!.AbsolutePath, name);
