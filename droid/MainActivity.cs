@@ -201,6 +201,8 @@ public sealed class MainActivity : Activity
         if (heroLogo != null) heroImg.SetImageBitmap(heroLogo);
         else heroImg.SetImageResource(Android.Resource.Drawable.IcMenuGallery);
         heroImg.SetScaleType(ImageView.ScaleType.CenterCrop);
+        heroImg.Clickable = true;
+        heroImg.Click += (_, _) => ShowAbout();
         try
         {
             var hrd = new GradientDrawable();
@@ -322,6 +324,17 @@ public sealed class MainActivity : Activity
 
         SetContentView(lay);
         RefreshLib();
+        // first launch: show About once (support links live there)
+        try
+        {
+            var prefs = GetPreferences(FileCreationMode.Private);
+            if (!prefs.Contains("about_shown_v1"))
+            {
+                prefs.Edit().PutBoolean("about_shown_v1", true).Apply();
+                lay.Post(() => { try { ShowAbout(); } catch { } });
+            }
+        }
+        catch { }
     }
 
     void SetConn(bool? ok, string text)
