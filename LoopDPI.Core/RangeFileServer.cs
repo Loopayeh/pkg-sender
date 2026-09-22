@@ -33,10 +33,22 @@ public sealed class CatalogEntry
     public bool HasIcon { get; init; }
 }
 
+/// <summary>
+/// Seekable byte source for direct (no-copy) serving, e.g. an Android
+/// SAF document served via dup'd fd + lseek. OpenAt must return a
+/// stream positioned at offset, independent per call (thread-safe).
+/// </summary>
+public interface IRangeSource
+{
+    long Length { get; }
+    Stream OpenAt(long offset);
+}
+
 public sealed class RangeFileServer : IDisposable
 {
     private readonly TcpListener _listener;
     private readonly IReadOnlyDictionary<string, string> _files;
+    private readonly ConcurrentDictionary<string, IRangeSource> _sources = new();
     private readonly long _singleSize;
     private CancellationTokenSource? _cts;
     private long _served;
@@ -86,6 +98,9 @@ public sealed class RangeFileServer : IDisposable
     private readonly ConcurrentDictionary<string, byte[]> _manifests = new();
     public void RegisterManifest(string id, string json) =>
         _manifests[id] = Encoding.UTF8.GetBytes(json);
+    /// <summary>Serve id from a seekable source instead of a file (direct mode).</summary>
+    public void RegisterSource(string id, IRangeSource source) => _sources[id] = source;
+    public void UnregisterSource(string id) => _sources.TryRemove(id, out _);
     public string ManifestUrlFor(string host, string id) =>
         $"http://{host}:{Port}/json/{Uri.EscapeDataString(id)}.json";
     /// <summary>Optional sink for every HTTP request line (diagnostics).</summary>
@@ -98,7 +113,7 @@ public sealed class RangeFileServer : IDisposable
         Task.Run(() => AcceptLoop(_cts.Token));
     }
 
-    /// <summary>Total bytes across all registered files (queue progress).</summary>
+    /// <summary>Total bytes across all registered files and sources (queue progress).</summary>
     public long TotalBytes()
     {
         long total = 0;
@@ -112,7 +127,24 @@ public sealed class RangeFileServer : IDisposable
             {
             }
         }
+        foreach (var s in _sources.Values)
+        {
+            try
+            {
+                total += s.Length;
+            }
+            catch
+            {
+            }
+        }
         return total;
+    }
+
+    private static FileStream OpenFileAt(string path, long start)
+    {
+        var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4 * 1024 * 1024, FileOptions.SequentialScan);
+        fs.Seek(start, SeekOrigin.Begin);
+        return fs;
     }
 
     private async Task AcceptLoop(CancellationToken ct)
@@ -290,8 +322,16 @@ public sealed class RangeFileServer : IDisposable
                 return;
             }
 
-            if (!_files.TryGetValue(id, out var path) || !File.Exists(path) ||
-                _revoked.ContainsKey(id))
+            IRangeSource? src = null;
+            string? path = null;
+            if (!_revoked.ContainsKey(id))
+            {
+                if (_sources.TryGetValue(id, out var s))
+                    src = s;
+                else if (_files.TryGetValue(id, out var p) && File.Exists(p))
+                    path = p;
+            }
+            if (src == null && path == null)
             {
                 Log("pkg 404");
                 await WriteRaw(ns, "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found", ct);
@@ -302,7 +342,7 @@ public sealed class RangeFileServer : IDisposable
             long size;
             try
             {
-                size = new FileInfo(path).Length;
+                size = src != null ? src.Length : new FileInfo(path!).Length;
             }
             catch
             {
@@ -377,8 +417,7 @@ public sealed class RangeFileServer : IDisposable
 
             try
             {
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4 * 1024 * 1024, FileOptions.SequentialScan);
-                fs.Seek(start, SeekOrigin.Begin);
+                using Stream fs = src != null ? src.OpenAt(start) : OpenFileAt(path!, start);
                 var buf = new byte[4 * 1024 * 1024];
                 while (length > 0 && !ct.IsCancellationRequested)
                 {

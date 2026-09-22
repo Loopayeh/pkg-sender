@@ -32,6 +32,8 @@ public sealed class MainActivity : Activity
     sealed class LibItem
     {
         public string Path = "";
+        public string? UriStr; // direct mode: original SAF uri, no copy
+        public bool Direct;
         public string Title = "";
         public string TitleId = "";
         public long Size;
@@ -198,6 +200,8 @@ public sealed class MainActivity : Activity
             i.AddCategory(Intent.CategoryOpenable);
             i.SetType("*/*");
             i.PutExtra(Intent.ExtraAllowMultiple, true);
+            i.AddFlags(ActivityFlags.GrantReadUriPermission
+                | ActivityFlags.GrantPersistableUriPermission);
             StartActivityForResult(Intent.CreateChooser(i, "Pick PKG"), PickReq);
         }
         catch (Exception ex) { Say("pick failed: " + Short(ex.Message)); }
@@ -239,6 +243,97 @@ public sealed class MainActivity : Activity
         });
     }
 
+    const long HeaderPrefetch = 128L << 20;
+
+    /// <summary>Seekable SAF document served straight to the console, no copy.</summary>
+    sealed class SafRangeSource : LoopDPI.Core.IRangeSource
+    {
+        readonly ContentResolver _cr;
+        readonly Android.Net.Uri _uri;
+        public long Length { get; }
+        public SafRangeSource(ContentResolver cr, Android.Net.Uri uri, long len)
+        { _cr = cr; _uri = uri; Length = len; }
+        public Stream OpenAt(long offset)
+        {
+            var pfd = _cr.OpenFileDescriptor(_uri, "r")
+                ?? throw new IOException("open fd failed");
+            Java.IO.FileInputStream? fin = null;
+            try
+            {
+                fin = new Java.IO.FileInputStream(pfd.FileDescriptor);
+                var ch = fin.Channel
+                    ?? throw new IOException("no channel");
+                ch.Position(offset); // lseek; throws on pipes
+                return new ChannelStream(ch, fin, pfd);
+            }
+            catch
+            {
+                try { fin?.Close(); } catch { }
+                try { pfd.Close(); } catch { }
+                throw;
+            }
+        }
+    }
+
+    sealed class ChannelStream : Stream
+    {
+        readonly Java.Nio.Channels.FileChannel _ch;
+        readonly Java.IO.FileInputStream _fin;
+        readonly Android.OS.ParcelFileDescriptor _pfd;
+        public ChannelStream(Java.Nio.Channels.FileChannel ch,
+            Java.IO.FileInputStream fin, Android.OS.ParcelFileDescriptor pfd)
+        { _ch = ch; _fin = fin; _pfd = pfd; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var bb = Java.Nio.ByteBuffer.Allocate(count);
+            int n = _ch.Read(bb);
+            if (n <= 0) return n;
+            bb.Flip();
+            bb.Get(buffer, offset, n);
+            return n;
+        }
+        public override long Seek(long o, SeekOrigin org) => throw new NotSupportedException();
+        public override void SetLength(long v) => throw new NotSupportedException();
+        public override void Write(byte[] b, int o, int c) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                try { _ch.Close(); } catch { }
+                try { _fin.Close(); } catch { }
+                try { _pfd.Close(); } catch { }
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    static bool TrySeek(Android.Net.Uri uri, ContentResolver cr)
+    {
+        try
+        {
+            using var pfd = cr.OpenFileDescriptor(uri, "r");
+            if (pfd?.FileDescriptor == null || !pfd.FileDescriptor.Valid())
+                return false;
+            using var fin = new Java.IO.FileInputStream(pfd.FileDescriptor);
+            var ch = fin.Channel;
+            if (ch == null) return false;
+            ch.Position(1); // probe lseek; pipes throw here
+            ch.Close();
+            return true;
+        }
+        catch { return false; }
+    }
+
     async Task<(bool Added, string Err)> AddUriAsync(Android.Net.Uri uri)
     {
         try
@@ -260,6 +355,63 @@ public sealed class MainActivity : Activity
                 }
             }
             catch (Exception ex) { return (false, "name query: " + ex.Message); }
+            try
+            {
+                ContentResolver!.TakePersistableUriPermission(uri,
+                    ActivityFlags.GrantReadUriPermission);
+            }
+            catch { }
+            lock (_lib)
+            {
+                if (_lib.Any(x => x.UriStr == uri.ToString())) return (false, "");
+            }
+
+            // DIRECT: seekable provider? serve straight from the document.
+            if (total > 0 && TrySeek(uri, ContentResolver!))
+            {
+                Say($"reading header {name}…");
+                PkgInfo? hpkg = null;
+                try
+                {
+                    using var src = ContentResolver!.OpenInputStream(uri)!;
+                    using var ms = new MemoryStream();
+                    var buf = new byte[1 << 20];
+                    long want = Math.Min(total, HeaderPrefetch);
+                    long got = 0;
+                    int n;
+                    while (got < want && (n = await src.ReadAsync(buf, 0, (int)Math.Min(buf.Length, want - got))) > 0)
+                    {
+                        ms.Write(buf, 0, n);
+                        got += n;
+                    }
+                    ms.Position = 0;
+                    hpkg = PkgReader.Read(ms);
+                }
+                catch { }
+                if (hpkg != null && (!string.IsNullOrEmpty(hpkg.Title) || !string.IsNullOrEmpty(hpkg.TitleId)))
+                {
+                    lock (_lib)
+                    {
+                        _lib.Add(new LibItem
+                        {
+                            Path = "direct:" + name,
+                            UriStr = uri.ToString(),
+                            Direct = true,
+                            Title = !string.IsNullOrEmpty(hpkg.Title) ? hpkg.Title : System.IO.Path.GetFileNameWithoutExtension(name),
+                            TitleId = hpkg.TitleId ?? "",
+                            Size = total,
+                            Platform = hpkg.Platform ?? "",
+                            Icon = hpkg.IconData,
+                            Pkg = hpkg,
+                            Queued = true,
+                        });
+                    }
+                    return (true, "");
+                }
+                // header parse missed (icon past prefetch etc.) -> copy fallback below
+                Say($"direct parse missed, copying {name}…");
+            }
+
             string dest = System.IO.Path.Combine(CacheDir!.AbsolutePath, name);
             bool have = false;
             try
@@ -392,7 +544,7 @@ public sealed class MainActivity : Activity
         var a = new TextView(this) { Text = it.Title };
         a.SetTextColor(Text); a.TextSize = 15; a.SetTypeface(null, TypefaceStyle.Bold);
         a.SetSingleLine(true); a.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
-        var b = new TextView(this) { Text = $"{it.TitleId} • {SizeStr(it.Size)}" };
+        var b = new TextView(this) { Text = $"{it.TitleId} • {SizeStr(it.Size)}{(it.Direct ? " • direct" : "")}" };
         b.SetTextColor(Muted); b.TextSize = 12;
         txt.AddView(a); txt.AddView(b);
         it.StateView = new TextView(this) { Text = it.State };
@@ -476,18 +628,42 @@ public sealed class MainActivity : Activity
         });
     }
 
+    /// <summary>Server serving one library item: direct SAF source or cached file.</summary>
+    RangeFileServer BuildServerFor(LibItem it)
+    {
+        var server = new RangeFileServer(new Dictionary<string, string>(), ServerPort);
+        if (it.Direct && it.UriStr != null)
+            server.RegisterSource("pkg", new SafRangeSource(ContentResolver!,
+                Android.Net.Uri.Parse(it.UriStr)!, it.Size));
+        else
+        {
+            server.Dispose();
+            server = new RangeFileServer(
+                new Dictionary<string, string> { ["pkg"] = it.Path }, ServerPort);
+        }
+        return server;
+    }
+
+    static PkgInfo WithSize(PkgInfo p, long size) => new PkgInfo
+    {
+        Title = p.Title, ContentId = p.ContentId, TitleId = p.TitleId,
+        ContentType = p.ContentType, Version = p.Version, IsDlc = p.IsDlc,
+        Platform = p.Platform, Description = p.Description, PackageSize = size,
+        Format = p.Format, IsFolder = p.IsFolder, Digest = p.Digest,
+        IconData = p.IconData, Params = p.Params,
+    };
+
     async Task<bool> SendOneAsync(string psIp, string pcIp, LibItem it)
     {
         try
         {
             _server?.Dispose();
-            var files = new Dictionary<string, string> { ["pkg"] = it.Path };
-            _server = new RangeFileServer(files, ServerPort);
+            _server = BuildServerFor(it);
             _server.Start();
             string url = _server.UrlFor(pcIp, "pkg");
 
             PkgInfo? pkg = it.Pkg;
-            if (pkg == null)
+            if (pkg == null && !it.Direct)
             {
                 try
                 {
@@ -496,13 +672,15 @@ public sealed class MainActivity : Activity
                 }
                 catch { }
             }
+            if (pkg != null && pkg.PackageSize != it.Size)
+                pkg = WithSize(pkg, it.Size);
             bool isPs4 = (pkg?.Platform ?? "").StartsWith("PS4");
 
             var (ok, reply) = await Ps4Installer.PushRpiAsync(psIp, url, it.Title);
             string method = "rpi";
             if (!ok && isPs4 && pkg != null)
             {
-                _server.RegisterManifest("pkg", Ps4Installer.BuildManifest(url, pkg.PackageSize, pkg.Digest));
+                _server.RegisterManifest("pkg", Ps4Installer.BuildManifest(url, it.Size, pkg.Digest));
                 var g = await Ps4Installer.PushGoldHenAsync(psIp, pcIp, _server.ManifestUrlFor(pcIp, "pkg"), pkg, ServerPort);
                 ok = g.Ok; reply = g.Reply; method = "goldhen";
             }
@@ -536,11 +714,10 @@ public sealed class MainActivity : Activity
             try
             {
                 LibItem? first;
-                lock (_lib) first = _lib.FirstOrDefault(x => File.Exists(x.Path));
+                lock (_lib) first = _lib.FirstOrDefault(x => x.Direct || File.Exists(x.Path));
                 if (first != null)
                 {
-                    probe = new RangeFileServer(
-                        new Dictionary<string, string> { ["pkg"] = first.Path }, ServerPort);
+                    probe = BuildServerFor(first);
                     probe.Start();
                     string url = probe.UrlFor("127.0.0.1", "pkg");
                     using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromSeconds(10) };
