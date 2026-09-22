@@ -158,6 +158,14 @@ public sealed class MainActivity : Activity
         }
         catch { }
         _subColor = Dyn("colorOnSurfaceVariant", Color.Gray);
+        try
+        {
+            // kill the white strip under the app (light system bars in dark mode)
+            var surface = Dyn("colorSurface", Color.White);
+            Window?.SetStatusBarColor(surface);
+            Window?.SetNavigationBarColor(surface);
+        }
+        catch { }
 
         var lay = new LinearLayout(this) { Orientation = Orientation.Vertical };
         try { lay.SetBackgroundColor(Dyn("colorSurface", Color.White)); } catch { }
@@ -262,6 +270,7 @@ public sealed class MainActivity : Activity
             | Android.Text.InputTypes.TextVariationVisiblePassword;
         string? saved = GetPreferences(FileCreationMode.Private).GetString("psip", null);
         if (!string.IsNullOrEmpty(saved)) _psIp.Text = saved;
+        else _psIp.Text = "192.168.1.";
         ipWrap.AddView(_psIp);
         ipRow.AddView(ipWrap);
         _testBtn = TonalBtn("Test", () => _ = TestAsync());
@@ -293,7 +302,7 @@ public sealed class MainActivity : Activity
         try { _libHead.SetTextColor(Dyn("colorOnSurface", Color.Black)); } catch { }
         _libHead.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         libRow.AddView(_libHead);
-        var addBtn = FilledBtn("+ Add PKG", PickFlow);
+        var addBtn = FilledBtn("+ Add PKG / Image", PickFlow);
         addBtn.CornerRadius = Dp(16);
         libRow.AddView(addBtn);
         lay.AddView(libRow);
@@ -391,7 +400,7 @@ public sealed class MainActivity : Activity
         v.SetPadding(pad, pad, pad, pad);
         var t = new TextView(this) { Text = "Transfer log (copy to me if a send fails)" };
         t.TextSize = 16; t.SetTypeface(null, TypefaceStyle.Bold);
-        var sv = new ScrollView(this);
+        var sv = new AndroidX.Core.Widget.NestedScrollView(this);
         var slp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, Dp(320));
         slp.TopMargin = Dp(8); slp.BottomMargin = Dp(12);
         sv.LayoutParameters = slp;
@@ -429,7 +438,7 @@ public sealed class MainActivity : Activity
         const string trust = "https://link.trustwallet.com/send?coin=20000714&address=0x839a30D52Ef7D2b53e818b9931efd7FE6F472e50&token_id=0x55d398326f99059fF775485246999027B3197955";
 
         var dlg = new BottomSheetDialog(this);
-        var sv = new ScrollView(this);
+        var sv = new AndroidX.Core.Widget.NestedScrollView(this);
         var v = new LinearLayout(this) { Orientation = Orientation.Vertical };
         int pad = Dp(24);
         v.SetPadding(pad, pad, pad, pad);
@@ -524,7 +533,16 @@ public sealed class MainActivity : Activity
             {
                 if (chained) return;
                 chained = true;
-                try { ShowGuide(); } catch { }
+                try
+                {
+                    // let the About sheet fully tear down first —
+                    // showing Guide instantly on dismiss wedges its scroll
+                    new Handler(Looper.MainLooper!).PostDelayed(() =>
+                    {
+                        try { ShowGuide(); } catch { }
+                    }, 400);
+                }
+                catch { try { ShowGuide(); } catch { } }
             };
         }
         dlg.Show();
@@ -533,24 +551,33 @@ public sealed class MainActivity : Activity
     void ShowGuide()
     {
         var dlg = new BottomSheetDialog(this);
-        var sv = new ScrollView(this);
+        var sv = new AndroidX.Core.Widget.NestedScrollView(this);
         var v = new LinearLayout(this) { Orientation = Orientation.Vertical };
         int pad = Dp(24);
         v.SetPadding(pad, pad, pad, pad);
         sv.AddView(v);
 
-        var t = new TextView(this) { Text = "راهنمای اتصال (بهترین حالت)" };
+        var t = new TextView(this) { Text = "Setup guide • راهنمای اتصال" };
         t.TextSize = 20; t.SetTypeface(null, TypefaceStyle.Bold);
         v.AddView(t);
 
         var b = new TextView(this)
         {
-            Text = "۱) کنسول را با کابل لن (LAN) به مودم وصل کن — نه وای‌فای. سرعت و پایداری خیلی بالاتر میره.\n\n"
+            Text = "BEST SETUP (recommended)\n"
+                + "1) Connect the console to the modem with a LAN cable — not Wi-Fi. Much faster and more stable.\n\n"
+                + "2) Connect the phone to the same modem's Wi-Fi (5GHz preferred). Phone and console must be on the same network (e.g. both 192.168.1.x).\n\n"
+                + "3) On PS5, run the exploit first, then load pkg-receiver.elf (it's bundled here — copy it from the pkg-receiver.elf card). On PS4, open Remote Package Installer and keep it in focus (minimize only after \"waiting to install\" is done). With GoldHEN: Settings → GoldHEN → Server Settings → enable the servers, then Test will find the console.\n\n"
+                + "4) Type the console IP above and tap Test. Green = connected.\n\n"
+                + "5) Tap + Add PKG / Image, tick the games, then Send queue. PKGs install on the console; disc images are copied to /data/homebrew. Keep the phone awake and don't leave the app mid-transfer.\n\n"
+                + "Tip: if Test can't reach the console, check the IP, and make sure the modem lets Wi-Fi devices talk to each other (a modem setting called AP/Client Isolation must be OFF).\n\n"
+                + "————————————————\n\n"
+                + "بهترین حالت (پیشنهادی)\n"
+                + "۱) کنسول را با کابل لن (LAN) به مودم وصل کن — نه وای‌فای. سرعت و پایداری خیلی بالاتر میره.\n\n"
                 + "۲) گوشی را به وای‌فای همان مودم وصل کن (ترجیحاً باند 5GHz). گوشی و کنسول باید توی یک شبکه باشن (مثلاً هر دو 192.168.1.x).\n\n"
-                + "۳) روی PS5 اول اکسپلویت را اجرا کن و pkg-receiver.elf را بفرست بالا (فایلش همین‌جا توی برنامه هست — از کارت pkg-receiver.elf کپی بگیر). روی PS4 ریموت پکیج اینستالر یا گلدHEN کافیه.\n\n"
+                + "۳) روی PS5 اول اکسپلویت را اجرا کن و pkg-receiver.elf را بفرست بالا (فایلش همین‌جا توی برنامه هست — از کارت pkg-receiver.elf کپی بگیر). روی PS4 برنامه Remote Package Installer را باز کن و بذار جلو بمونه (بعد از شروع نصب می‌تونی مینیمایزش کنی). با گلدHEN: برو توی Settings ← GoldHEN ← Server Settings و سرورها (Payload/BinLoader Server) را روشن کن، بعد Test کنسول را پیدا می‌کنه.\n\n"
                 + "۴) آی‌پی کنسول را بالا وارد کن و Test را بزن. سبز شد یعنی وصله.\n\n"
-                + "۵) با + Add PKG بازی اضافه کن، تیک بزن و Send queue را بزن. وسط انتقال گوشی را خاموش نکن و از برنامه بیرون نرو.\n\n"
-                + "نکته: اگه Test وصل نشد، مطمئن شو isolation مودم (AP isolation) خاموشه و آی‌پی را درست زدی."
+                + "۵) با + Add PKG / Image بازی اضافه کن (PKG یا ایمیج دیسک — ایمیج‌ها توی /data/homebrew کپی می‌شن)، تیک بزن و Send queue را بزن. وسط انتقال گوشی را خاموش نکن و از برنامه بیرون نرو.\n\n"
+                + "نکته: اگه Test وصل نشد، آی‌پی را چک کن و مطمئن شو مودم اجازه می‌ده دستگاه‌های وای‌فای همدیگه رو ببینن (تو تنظیمات وای‌فای مودم گزینه‌ای به اسم AP/Client Isolation هست — باید خاموش باشه)."
         };
         b.SetTextColor(_subColor); b.TextSize = 14;
         var bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
@@ -1138,7 +1165,7 @@ public sealed class MainActivity : Activity
         }
         if (_lib.Count == 0)
         {
-            var e = new TextView(this) { Text = "empty — + Add PKG to stage games from your phone" };
+            var e = new TextView(this) { Text = "empty — + Add PKG / Image to stage games (PKG or disc image) from your phone" };
             e.SetTextColor(_subColor); e.TextSize = 13;
             e.SetPadding(Dp(4), Dp(12), Dp(4), Dp(12));
             box.AddView(e);
