@@ -388,24 +388,129 @@ public sealed class MainActivity : Activity
 
     void ShowAbout()
     {
+        const string repo = "https://github.com/Loopayeh/pkg-sender";
+        const string site = "https://loopayeh.github.io/";
+        const string usdt = "0x839a30D52Ef7D2b53e818b9931efd7FE6F472e50";
+        const string trust = "https://link.trustwallet.com/send?coin=20000714&address=0x839a30D52Ef7D2b53e818b9931efd7FE6F472e50&token_id=0x55d398326f99059fF775485246999027B3197955";
+
         var dlg = new BottomSheetDialog(this);
+        var sv = new ScrollView(this);
         var v = new LinearLayout(this) { Orientation = Orientation.Vertical };
         int pad = Dp(24);
         v.SetPadding(pad, pad, pad, pad);
+        sv.AddView(v);
+
+        // header: logo + name + version
+        var head = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        head.SetGravity(GravityFlags.CenterVertical);
+        var him = new ImageView(this);
+        him.LayoutParameters = new LinearLayout.LayoutParams(Dp(48), Dp(48));
+        him.SetScaleType(ImageView.ScaleType.CenterCrop);
+        try
+        {
+            using var s = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.logo.png");
+            if (s != null)
+                using (var bmp = BitmapFactory.DecodeStream(s))
+                    if (bmp != null)
+                        him.SetImageBitmap(Bitmap.CreateScaledBitmap(bmp, Dp(48), Dp(48), true));
+        }
+        catch { }
+        head.AddView(him);
+        var ht = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        var htp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        htp.LeftMargin = Dp(14);
+        ht.LayoutParameters = htp;
         var t = new TextView(this) { Text = "PKG Sender" };
         t.TextSize = 20; t.SetTypeface(null, TypefaceStyle.Bold);
+        var ver = new TextView(this) { Text = "1.0.0 (Android) • by Loopayeh" };
+        ver.SetTextColor(_subColor); ver.TextSize = 13;
+        ht.AddView(t); ht.AddView(ver);
+        head.AddView(ht);
+        v.AddView(head);
+
         var b = new TextView(this)
         {
-            Text = "1.0.0 (droid) • by Loopayeh\n\ngithub.com/Loopayeh/pkg-sender\n\nInstalls PS4/PS5 games over LAN.\nRun pkg-receiver.elf on PS5 or RPI/GoldHEN on PS4."
+            Text = "Installs PS4/PS5 games over LAN.\nRun pkg-receiver.elf on PS5, or Remote Package Installer / GoldHEN on PS4."
         };
         b.SetTextColor(_subColor); b.TextSize = 14;
         var bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        bp.TopMargin = Dp(8); bp.BottomMargin = Dp(16);
+        bp.TopMargin = Dp(12); bp.BottomMargin = Dp(4);
         b.LayoutParameters = bp;
+        v.AddView(b);
+
+        v.AddView(SectionLabel("Links"));
+        v.AddView(LinkRow("GitHub — source & releases", repo));
+        v.AddView(LinkRow("Website — more projects", site));
+
+        v.AddView(SectionLabel("Support the project"));
+        var dn = new TextView(this) { Text = "If you enjoy this app, a small donation keeps it going." };
+        dn.SetTextColor(_subColor); dn.TextSize = 13;
+        v.AddView(dn);
+        var addr = new TextView(this) { Text = "USDT (BEP-20)\n" + usdt };
+        addr.SetTextIsSelectable(true);
+        addr.Typeface = Android.Graphics.Typeface.Monospace;
+        addr.TextSize = 12;
+        var ap = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        ap.TopMargin = Dp(8);
+        addr.LayoutParameters = ap;
+        v.AddView(addr);
+        var drow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        var dp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        dp.TopMargin = Dp(10); dp.BottomMargin = Dp(16);
+        drow.LayoutParameters = dp;
+        var copyBtn = TonalBtn("Copy address", () =>
+        {
+            try
+            {
+                var cm = (ClipboardManager?)GetSystemService(ClipboardService);
+                cm!.PrimaryClip = ClipData.NewPlainText("USDT", usdt);
+                Say("donate address copied");
+            }
+            catch { }
+        });
+        copyBtn.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        var twBtn = TonalBtn("TrustWallet", () =>
+        {
+            try { StartActivity(new Intent(Intent.ActionView, Android.Net.Uri.Parse(trust))); } catch { }
+        });
+        var twp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        twp.LeftMargin = Dp(8);
+        twBtn.LayoutParameters = twp;
+        drow.AddView(copyBtn); drow.AddView(twBtn);
+        v.AddView(drow);
+
         var close = FilledBtn("Close", () => dlg.Dismiss());
-        v.AddView(t); v.AddView(b); v.AddView(close);
-        dlg.SetContentView(v);
+        v.AddView(close);
+        dlg.SetContentView(sv);
         dlg.Show();
+    }
+
+    TextView SectionLabel(string s)
+    {
+        var l = new TextView(this) { Text = s };
+        l.TextSize = 13; l.SetTypeface(null, TypefaceStyle.Bold);
+        try { l.SetTextColor(Dyn("colorPrimary", Color.Gray)); } catch { }
+        var lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        lp.TopMargin = Dp(16); lp.BottomMargin = Dp(4);
+        l.LayoutParameters = lp;
+        return l;
+    }
+
+    TextView LinkRow(string label, string url)
+    {
+        var l = new TextView(this) { Text = label + "\n" + url };
+        l.TextSize = 14;
+        try { l.SetTextColor(Dyn("colorPrimary", Color.Blue)); } catch { }
+        l.SetTextIsSelectable(true);
+        l.Clickable = true;
+        l.Click += (_, _) =>
+        {
+            try { StartActivity(new Intent(Intent.ActionView, Android.Net.Uri.Parse(url))); } catch { }
+        };
+        var lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        lp.TopMargin = Dp(4); lp.BottomMargin = Dp(4);
+        l.LayoutParameters = lp;
+        return l;
     }
 
     // ---------- library ----------
