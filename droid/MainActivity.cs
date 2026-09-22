@@ -96,7 +96,8 @@ public sealed class MainActivity : Activity
         // console row: IP + test
         var ipRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         ipRow.SetGravity(GravityFlags.CenterVertical);
-        var ipp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        var ipp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         ipp.TopMargin = Dp(12);
         ipRow.LayoutParameters = ipp;
         _psIp = new EditText(this) { Hint = "Console IP, e.g. 192.168.1.105" };
