@@ -99,17 +99,27 @@ public sealed class MainActivity : Activity
 
     MaterialButton FilledBtn(string text, Action onClick)
     {
-        var b = new MaterialButton(this) { Text = text };
+        var b = new MaterialButton(this, null, MatAttr("materialButtonStyle")) { Text = text };
+        b.CornerRadius = Dp(12);
         b.Click += (_, _) => onClick();
         return b;
     }
 
     MaterialButton TonalBtn(string text, Action onClick)
     {
-        var b = new MaterialButton(this) { Text = text };
-        b.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(
-            Dyn("colorPrimaryContainer", Color.LightGray));
-        b.SetTextColor(Dyn("colorOnPrimaryContainer", Color.Black));
+        var b = new MaterialButton(this, null, MatAttr("materialButtonOutlinedStyle")) { Text = text };
+        try
+        {
+            // tonal-filled look: container tint + matching stroke, SlipNet-style pill
+            b.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(
+                Dyn("colorSecondaryContainer", Color.LightGray));
+            b.SetTextColor(Dyn("colorOnSecondaryContainer", Color.Black));
+            b.StrokeColor = Android.Content.Res.ColorStateList.ValueOf(
+                Dyn("colorOutlineVariant", Color.LightGray));
+            b.StrokeWidth = Dp(1);
+        }
+        catch { }
+        b.CornerRadius = Dp(20);
         b.Click += (_, _) => onClick();
         return b;
     }
@@ -140,6 +150,13 @@ public sealed class MainActivity : Activity
         var bar = new MaterialToolbar(this);
         bar.Title = "PKG Sender";
         bar.Subtitle = "PS4 / PS5 over LAN";
+        try
+        {
+            bar.SetBackgroundColor(Dyn("colorSurfaceContainer", Color.Transparent));
+            bar.SetTitleTextColor(Dyn("colorOnSurface", Color.Black));
+            bar.SetSubtitleTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
+        }
+        catch { }
         try
         {
             using var s = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.logo.png");
@@ -688,6 +705,14 @@ public sealed class MainActivity : Activity
         card.LayoutParameters = cp;
         card.Radius = Dp(16);
         card.CardElevation = Dp(1);
+        try
+        {
+            card.StrokeWidth = Dp(1);
+            card.StrokeColor = Dyn("colorOutlineVariant", Color.ParseColor("#E0E0E0"));
+            if (it.Queued)
+                card.StrokeColor = Dyn("colorPrimary", Color.ParseColor("#6750A4"));
+        }
+        catch { }
 
         var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         row.SetGravity(GravityFlags.CenterVertical);
@@ -699,6 +724,15 @@ public sealed class MainActivity : Activity
         ilp.RightMargin = Dp(12);
         img.LayoutParameters = ilp;
         img.SetScaleType(ImageView.ScaleType.CenterCrop);
+        try
+        {
+            var rd = new GradientDrawable();
+            rd.SetCornerRadius(Dp(12));
+            rd.SetColor(Android.Graphics.Color.Transparent);
+            img.SetBackgroundDrawable(rd);
+            img.ClipToOutline = true;
+        }
+        catch { }
         Bitmap? bmp = null;
         try
         {
