@@ -906,14 +906,14 @@ public sealed class MainActivity : Activity
         b.SetTextColor(_subColor); b.TextSize = 13;
         txt.AddView(b);
         it.StateView = new TextView(this) { Text = it.State };
-        it.StateView.SetTextColor(it.State.StartsWith("done") ? Good : it.State.StartsWith("fail") ? Bad : _subColor);
-        it.StateView.TextSize = 13;
+        PaintState(it.StateView, it.State);
         txt.AddView(it.StateView);
         row.AddView(txt);
 
-        var cb = new MaterialCheckBox(this) { Checked = it.Queued };
+        var cb = new MaterialCheckBox(this) { Checked = it.Queued, Enabled = !_busy };
         cb.CheckedChange += (_, e) =>
         {
+            if (_busy) { cb.Checked = it.Queued; return; }
             it.Queued = e.IsChecked;
             try
             {
@@ -936,7 +936,7 @@ public sealed class MainActivity : Activity
         };
         row.AddView(cb);
         row.Clickable = true;
-        row.Click += (_, _) => { cb.Checked = !cb.Checked; };
+        row.Click += (_, _) => { if (_busy) return; cb.Checked = !cb.Checked; };
         it.Row = card;
         return card;
     }
@@ -963,6 +963,7 @@ public sealed class MainActivity : Activity
         _busy = true;
         _sendBtn!.Enabled = false;
         _testBtn!.Enabled = false;
+        RunOnUiThread(() => RefreshLib()); // rebuild rows with locked checkboxes
         // keep Wi-Fi/CPU awake: doze or Wi-Fi power-save dropping the
         // server mid-transfer looks like a random "copy failed" on console
         Android.Net.Wifi.WifiManager.WifiLock? wl = null;
@@ -1013,7 +1014,9 @@ public sealed class MainActivity : Activity
             try { wl?.Dispose(); } catch { }
             try { cpu?.Dispose(); } catch { }
             _busy = false;
-            RunOnUiThread(() => { _sendBtn.Enabled = true; _testBtn!.Enabled = true; });
+            // done items leave the queue (unticked); failed stay ticked for retry
+            lock (_lib) foreach (var q in queue) if (q.State.StartsWith("done")) q.Queued = false;
+            RunOnUiThread(() => { _sendBtn.Enabled = true; _testBtn!.Enabled = true; RefreshLib(); });
         }
     }
 
@@ -1116,16 +1119,35 @@ public sealed class MainActivity : Activity
         catch { return false; }
     }
 
+    void PaintState(TextView v, string s)
+    {
+        try
+        {
+            bool done = s.StartsWith("done");
+            bool fail = s.StartsWith("fail");
+            v.Text = (done ? "✓ " : fail ? "✕ " : "") + s;
+            v.TextSize = 13;
+            if (done || fail) v.SetTypeface(null, TypefaceStyle.Bold);
+            if (done || fail)
+            {
+                var d = new GradientDrawable();
+                d.SetCornerRadius(Dp(8));
+                d.SetColor(done ? Color.ParseColor("#E6F4EA") : Color.ParseColor("#FCE8E6"));
+                v.SetBackgroundDrawable(d);
+                v.SetPadding(Dp(8), Dp(3), Dp(8), Dp(3));
+            }
+            else v.SetBackgroundDrawable(null);
+            v.SetTextColor(done ? Color.ParseColor("#1B7A2E") : fail ? Color.ParseColor("#C62828") : _subColor);
+        }
+        catch { }
+    }
+
     void SetState(LibItem it, string s)
     {
         it.State = s;
         RunOnUiThread(() =>
         {
-            if (it.StateView != null)
-            {
-                it.StateView.Text = s;
-                it.StateView.SetTextColor(s.StartsWith("done") ? Good : s.StartsWith("fail") ? Bad : _subColor);
-            }
+            if (it.StateView != null) PaintState(it.StateView, s);
         });
     }
 
