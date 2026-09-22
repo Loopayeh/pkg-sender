@@ -269,14 +269,14 @@ public sealed class MainActivity : Activity
                 {
                     var buf = new byte[1 << 20];
                     long got = 0;
-                    long lastTick = Environment.TickCount64;
+                    long lastTick = System.Environment.TickCount64;
                     long lastGot = 0;
                     int n;
                     while ((n = await src.ReadAsync(buf, 0, buf.Length)) > 0)
                     {
                         await dst.WriteAsync(buf, 0, n);
                         got += n;
-                        long now = Environment.TickCount64;
+                        long now = System.Environment.TickCount64;
                         if (now - lastTick >= 500)
                         {
                             double mb = got / 1048576.0;
