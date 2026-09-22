@@ -331,7 +331,7 @@ public sealed class MainActivity : Activity
         {
             var bb = Java.Nio.ByteBuffer.Allocate(count);
             int n = _ch.Read(bb);
-            if (n <= 0) return n;
+            if (n <= 0) return 0; // Stream contract: 0 at end, never -1
             bb.Flip();
             bb.Get(buffer, offset, n);
             _pos += n;
@@ -656,6 +656,30 @@ public sealed class MainActivity : Activity
         _busy = true;
         _sendBtn!.Enabled = false;
         _testBtn!.Enabled = false;
+        // keep Wi-Fi/CPU awake: doze or Wi-Fi power-save dropping the
+        // server mid-transfer looks like a random "copy failed" on console
+        Android.Net.Wifi.WifiManager.WifiLock? wl = null;
+        PowerManager.WakeLock? cpu = null;
+        try
+        {
+            try
+            {
+                var wifi = (Android.Net.Wifi.WifiManager?)GetSystemService(WifiService);
+                wl = wifi?.CreateWifiLock(Android.Net.WifiMode.FullHighPerf, "pkgsender:send");
+                wl?.SetReferenceCounted(false);
+                wl?.Acquire();
+            }
+            catch { }
+            try
+            {
+                var pm = (PowerManager?)GetSystemService(PowerService);
+                cpu = pm?.NewWakeLock(WakeLockFlags.Partial, "pkgsender:send");
+                cpu?.SetReferenceCounted(false);
+                cpu?.Acquire(30 * 60 * 1000L);
+            }
+            catch { }
+        }
+        catch { }
         RunOnUiThread(() => { _prog!.Max = queue.Count; _prog.SetProgressCompat(0, false); _prog.Visibility = ViewStates.Visible; });
         try
         {
@@ -669,7 +693,7 @@ public sealed class MainActivity : Activity
                 SetState(it, ok ? "done" : "failed");
                 if (ok) done++;
                 int d = done, n = queue.Count;
-                RunOnUiThread(() => { _prog!.SetProgressCompat(d, true); });
+                RunOnUiThread(() => { _prog!.Max = n; _prog.SetProgressCompat(d, true); });
                 Say($"{d}/{n} sent");
             }
             Say(done == queue.Count ? $"all {done} sent — watch the console." : $"{done}/{queue.Count} sent, {queue.Count - done} failed");
@@ -677,9 +701,60 @@ public sealed class MainActivity : Activity
         catch (Exception ex) { Say("error: " + Short(ex.Message)); }
         finally
         {
+            try { if (wl?.IsHeld == true) wl.Release(); } catch { }
+            try { if (cpu?.IsHeld == true) cpu.Release(); } catch { }
+            try { wl?.Dispose(); } catch { }
+            try { cpu?.Dispose(); } catch { }
             _busy = false;
             RunOnUiThread(() => { _sendBtn.Enabled = true; _testBtn!.Enabled = true; });
         }
+    }
+
+    /// <summary>
+    /// Follow a receiver pull copy to completion: live MB/%/speed on the
+    /// phone progress bar, then byte-verify the landed file. False on
+    /// stall, drop, or size mismatch.
+    /// </summary>
+    async Task<bool> TrackPullAsync(string psIp, string remote, LibItem it)
+    {
+        long t0 = System.Environment.TickCount64;
+        long lastGot = 0;
+        long lastTick = t0;
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(1000);
+                var (active, name, got, want, paused) =
+                    await ConsoleClient.GetPullAsync(psIp);
+                if (!active) break;
+                long now = System.Environment.TickCount64;
+                double sec = Math.Max(1, now - lastTick) / 1000.0;
+                double spd = (got - lastGot) / 1048576.0 / sec;
+                lastTick = now; lastGot = got;
+                long g = got, w = want;
+                RunOnUiThread(() =>
+                {
+                    if (w > 0)
+                    {
+                        _prog!.Max = 1000;
+                        _prog.SetProgressCompat((int)Math.Min(1000, 1000L * g / w), false);
+                    }
+                    Say($"copying… {g / 1048576.0:0}/{w / 1048576.0:0} MB ({(w > 0 ? 100.0 * g / w : 0):0}%, {spd:0.0} MB/s){(paused ? " — paused" : "")}");
+                });
+                SetState(it, $"copying {100.0 * got / Math.Max(1, want):0}%");
+                if (now - t0 > 6 * 60 * 60 * 1000L) return false;
+            }
+        }
+        catch { return false; }
+        try
+        {
+            var (exists, size) = await ConsoleClient.StatAsync(psIp, remote);
+            if (exists && size == it.Size) return true;
+            Say($"landed size mismatch (console {size}, want {it.Size})");
+            return false;
+        }
+        catch { return false; }
     }
 
     void SetState(LibItem it, string s)
@@ -743,23 +818,33 @@ public sealed class MainActivity : Activity
                 pkg = WithSize(pkg, it.Size);
             bool isPs4 = (pkg?.Platform ?? "").StartsWith("PS4");
 
-            // cover for the console install notification (console fetches it)
+            // cover for the console install notification (console fetches it).
+            // Unique id per send: the console caches artwork by URL, so a
+            // fixed /icon/pkg would show the previous game's cover.
             string? iconUrl = null;
             if (it.Icon is { Length: > 0 })
             {
-                _server.RegisterIcon("pkg", it.Icon);
-                iconUrl = _server.IconUrlFor(pcIp, "pkg");
+                string iconId = "icon" + DateTime.UtcNow.Ticks;
+                _server.RegisterIcon(iconId, it.Icon);
+                iconUrl = _server.IconUrlFor(pcIp, iconId);
             }
 
-            // disc images go to /data/homebrew via receiver pull, not install
+            // disc images go to /data/homebrew via receiver pull, not install.
+            // Poll the receiver's pull status so the phone shows live progress.
             if (it.Format != "pkg")
             {
                 string remote = "/data/homebrew/" + it.FileName;
                 Say($"copying {it.FileName} to console…");
                 var (pok, preply) = await ConsoleClient.PullAsync(psIp, url, remote, resume: true);
-                SetState(it, pok ? "done" : "failed");
-                if (!pok) Say($"copy failed: {Short(preply)}");
-                return pok;
+                if (!pok)
+                {
+                    SetState(it, "failed");
+                    Say($"copy failed: {Short(preply)}");
+                    return false;
+                }
+                bool landed = await TrackPullAsync(psIp, remote, it);
+                SetState(it, landed ? "done" : "failed");
+                return landed;
             }
 
             var (ok, reply) = await Ps4Installer.PushRpiAsync(psIp, url, it.Title, iconUrl);
