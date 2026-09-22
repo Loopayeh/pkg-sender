@@ -37,6 +37,7 @@ public sealed class MainActivity : Activity
         public long Size;
         public string Platform = "";
         public byte[]? Icon;
+        public PkgInfo? Pkg;
         public bool Queued;
         public string State = "";
         public LinearLayout? Row;
@@ -243,6 +244,7 @@ public sealed class MainActivity : Activity
         try
         {
             string name = "game.pkg";
+            long total = -1;
             try
             {
                 using var c = ContentResolver!.Query(uri, null, null, null, null);
@@ -250,20 +252,49 @@ public sealed class MainActivity : Activity
                 {
                     int idx = c.GetColumnIndex(Android.Provider.OpenableColumns.DisplayName);
                     if (idx >= 0) name = c.GetString(idx) ?? name;
+                    int szi = c.GetColumnIndex(Android.Provider.OpenableColumns.Size);
+                    if (szi >= 0)
+                    {
+                        try { total = c.GetLong(szi); } catch { }
+                    }
                 }
             }
             catch (Exception ex) { return (false, "name query: " + ex.Message); }
             string dest = System.IO.Path.Combine(CacheDir!.AbsolutePath, name);
             try
             {
+                Say($"copying {name}…");
                 using (var src = ContentResolver!.OpenInputStream(uri)!)
                 using (var dst = File.Create(dest))
-                    await src.CopyToAsync(dst);
+                {
+                    var buf = new byte[1 << 20];
+                    long got = 0;
+                    long lastTick = Environment.TickCount64;
+                    long lastGot = 0;
+                    int n;
+                    while ((n = await src.ReadAsync(buf, 0, buf.Length)) > 0)
+                    {
+                        await dst.WriteAsync(buf, 0, n);
+                        got += n;
+                        long now = Environment.TickCount64;
+                        if (now - lastTick >= 500)
+                        {
+                            double mb = got / 1048576.0;
+                            double spd = (got - lastGot) / 1048576.0 / ((now - lastTick) / 1000.0);
+                            string msg = total > 0
+                                ? $"copying {name}… {mb:0}/{total / 1048576.0:0} MB ({100.0 * got / total:0}%, {spd:0.0} MB/s)"
+                                : $"copying {name}… {mb:0} MB ({spd:0.0} MB/s)";
+                            lastTick = now; lastGot = got;
+                            Say(msg);
+                        }
+                    }
+                }
             }
             catch (Exception ex) { return (false, "copy: " + ex.Message); }
             PkgInfo? pkg = null;
             try
             {
+                Say($"reading {name}…");
                 using var fs = File.Open(dest, FileMode.Open, FileAccess.Read, FileShare.Read);
                 pkg = PkgReader.Read(fs);
             }
@@ -279,6 +310,7 @@ public sealed class MainActivity : Activity
                     Size = pkg?.PackageSize ?? new FileInfo(dest).Length,
                     Platform = pkg?.Platform ?? "",
                     Icon = pkg?.IconData,
+                    Pkg = pkg,
                     Queued = true,
                 });
             }
@@ -445,13 +477,16 @@ public sealed class MainActivity : Activity
             _server.Start();
             string url = _server.UrlFor(pcIp, "pkg");
 
-            PkgInfo? pkg = null;
-            try
+            PkgInfo? pkg = it.Pkg;
+            if (pkg == null)
             {
-                using var fs = File.Open(it.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
-                pkg = PkgReader.Read(fs);
+                try
+                {
+                    using var fs = File.Open(it.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    pkg = PkgReader.Read(fs);
+                }
+                catch { }
             }
-            catch { }
             bool isPs4 = (pkg?.Platform ?? "").StartsWith("PS4");
 
             var (ok, reply) = await Ps4Installer.PushRpiAsync(psIp, url, it.Title);
