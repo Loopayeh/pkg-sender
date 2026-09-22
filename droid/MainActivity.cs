@@ -34,6 +34,8 @@ public sealed class MainActivity : Activity
         public string Path = "";
         public string? UriStr; // direct mode: original SAF uri, no copy
         public bool Direct;
+        public string Format = "pkg"; // pkg | exfat | ffpfsc | ffpkg
+        public string FileName = ""; // remote basename for image copy
         public string Title = "";
         public string TitleId = "";
         public long Size;
@@ -367,29 +369,42 @@ public sealed class MainActivity : Activity
             }
 
             // DIRECT: seekable provider? serve straight from the document.
+            string low = name.ToLowerInvariant();
+            string fmt = low.EndsWith(".exfat") ? "exfat"
+                : low.EndsWith(".ffpfsc") ? "ffpfsc"
+                : low.EndsWith(".ffpkg") ? "ffpkg" : "pkg";
+            bool isImage = fmt != "pkg";
             if (total > 0 && TrySeek(uri, ContentResolver!))
             {
                 Say($"reading header {name}…");
                 PkgInfo? hpkg = null;
-                try
+                if (!isImage)
                 {
-                    using var src = ContentResolver!.OpenInputStream(uri)!;
-                    using var ms = new MemoryStream();
-                    var buf = new byte[1 << 20];
-                    long want = Math.Min(total, HeaderPrefetch);
-                    long got = 0;
-                    int n;
-                    while (got < want && (n = await src.ReadAsync(buf, 0, (int)Math.Min(buf.Length, want - got))) > 0)
+                    try
                     {
-                        ms.Write(buf, 0, n);
-                        got += n;
+                        using var src = ContentResolver!.OpenInputStream(uri)!;
+                        using var ms = new MemoryStream();
+                        var buf = new byte[1 << 20];
+                        long want = Math.Min(total, HeaderPrefetch);
+                        long got = 0;
+                        int n;
+                        while (got < want && (n = await src.ReadAsync(buf, 0, (int)Math.Min(buf.Length, want - got))) > 0)
+                        {
+                            ms.Write(buf, 0, n);
+                            got += n;
+                        }
+                        ms.Position = 0;
+                        hpkg = PkgReader.Read(ms);
                     }
-                    ms.Position = 0;
-                    hpkg = PkgReader.Read(ms);
+                    catch { }
                 }
-                catch { }
-                if (hpkg != null && (!string.IsNullOrEmpty(hpkg.Title) || !string.IsNullOrEmpty(hpkg.TitleId)))
+                bool usable = hpkg != null
+                    && (!string.IsNullOrEmpty(hpkg.Title) || !string.IsNullOrEmpty(hpkg.TitleId));
+                if (usable || isImage)
                 {
+                    string title = usable && !string.IsNullOrEmpty(hpkg!.Title)
+                        ? hpkg.Title
+                        : PrettyName(name);
                     lock (_lib)
                     {
                         _lib.Add(new LibItem
@@ -397,12 +412,14 @@ public sealed class MainActivity : Activity
                             Path = "direct:" + name,
                             UriStr = uri.ToString(),
                             Direct = true,
-                            Title = !string.IsNullOrEmpty(hpkg.Title) ? hpkg.Title : System.IO.Path.GetFileNameWithoutExtension(name),
-                            TitleId = hpkg.TitleId ?? "",
+                            Format = fmt,
+                            FileName = name,
+                            Title = title,
+                            TitleId = usable ? hpkg!.TitleId ?? "" : GameReader.TitleIdFromName(name),
                             Size = total,
-                            Platform = hpkg.Platform ?? "",
-                            Icon = hpkg.IconData,
-                            Pkg = hpkg,
+                            Platform = usable ? hpkg!.Platform ?? "" : "",
+                            Icon = usable ? hpkg!.IconData : null,
+                            Pkg = usable ? hpkg : null,
                             Queued = true,
                         });
                     }
@@ -456,8 +473,13 @@ public sealed class MainActivity : Activity
             try
             {
                 Say($"reading {name}…");
-                using var fs = File.Open(dest, FileMode.Open, FileAccess.Read, FileShare.Read);
-                pkg = PkgReader.Read(fs);
+                if (isImage)
+                    pkg = GameReader.Read(dest);
+                else
+                {
+                    using var fs = File.Open(dest, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    pkg = PkgReader.Read(fs);
+                }
             }
             catch (Exception ex) { return (false, "parse: " + ex.Message); }
             lock (_lib)
@@ -466,9 +488,11 @@ public sealed class MainActivity : Activity
                 _lib.Add(new LibItem
                 {
                     Path = dest,
-                    Title = pkg?.Title is { Length: > 0 } t ? t : System.IO.Path.GetFileNameWithoutExtension(name),
-                    TitleId = pkg?.TitleId ?? "",
-                    Size = pkg?.PackageSize ?? new FileInfo(dest).Length,
+                    Format = fmt,
+                    FileName = name,
+                    Title = pkg?.Title is { Length: > 0 } t ? t : PrettyName(name),
+                    TitleId = pkg?.TitleId is { Length: > 0 } i ? i : GameReader.TitleIdFromName(name),
+                    Size = pkg != null && pkg.PackageSize > 0 ? pkg.PackageSize : new FileInfo(dest).Length,
                     Platform = pkg?.Platform ?? "",
                     Icon = pkg?.IconData,
                     Pkg = pkg,
@@ -478,6 +502,12 @@ public sealed class MainActivity : Activity
             return (true, "");
         }
         catch (Exception ex) { return (false, ex.Message); }
+    }
+
+    static string PrettyName(string name)
+    {
+        string b = System.IO.Path.GetFileNameWithoutExtension(name) ?? name;
+        return b.Replace('_', ' ').Replace('.', ' ').Trim();
     }
 
     static string SizeStr(long n) =>
@@ -544,7 +574,7 @@ public sealed class MainActivity : Activity
         var a = new TextView(this) { Text = it.Title };
         a.SetTextColor(Text); a.TextSize = 15; a.SetTypeface(null, TypefaceStyle.Bold);
         a.SetSingleLine(true); a.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
-        var b = new TextView(this) { Text = $"{it.TitleId} • {SizeStr(it.Size)}{(it.Direct ? " • direct" : "")}" };
+        var b = new TextView(this) { Text = $"{it.Format.ToUpperInvariant()} • {it.TitleId} • {SizeStr(it.Size)}{(it.Direct ? " • direct" : "")}" };
         b.SetTextColor(Muted); b.TextSize = 12;
         txt.AddView(a); txt.AddView(b);
         it.StateView = new TextView(this) { Text = it.State };
@@ -675,6 +705,17 @@ public sealed class MainActivity : Activity
             if (pkg != null && pkg.PackageSize != it.Size)
                 pkg = WithSize(pkg, it.Size);
             bool isPs4 = (pkg?.Platform ?? "").StartsWith("PS4");
+
+            // disc images go to /data/homebrew via receiver pull, not install
+            if (it.Format != "pkg")
+            {
+                string remote = "/data/homebrew/" + it.FileName;
+                Say($"copying {it.FileName} to console…");
+                var (pok, preply) = await ConsoleClient.PullAsync(psIp, url, remote, resume: true);
+                SetState(it, pok ? "done" : "failed");
+                if (!pok) Say($"copy failed: {Short(preply)}");
+                return pok;
+            }
 
             var (ok, reply) = await Ps4Installer.PushRpiAsync(psIp, url, it.Title);
             string method = "rpi";
