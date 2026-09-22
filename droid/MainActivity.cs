@@ -196,7 +196,7 @@ public sealed class MainActivity : Activity
         try
         {
             Say("probing console (12800/9090)…");
-            string mode = await Ps4Installer.DetectAsync(psIp);
+            string mode = await Ps4Installer.DetectAsync(psIp, fresh: true);
             string pcIp = await Task.Run(() => PhoneIpFor(psIp));
             if (mode == "offline")
             {

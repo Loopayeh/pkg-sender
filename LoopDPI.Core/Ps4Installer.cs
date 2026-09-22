@@ -45,12 +45,14 @@ public static class Ps4Installer
         return body != null && body.Replace(" ", "").Contains("\"status\":\"ready\"");
     }
 
-    public static async Task<string> DetectAsync(string ip)
+    public static async Task<string> DetectAsync(string ip, bool fresh = false)
     {
         // Detection probes several ports with second-scale timeouts; cache
         // per IP so rapid pushes (queue) don't pay it every time. 60s TTL:
         // long enough to matter, short enough to notice a fresh RPI/HEN.
-        if (_detectCache.TryGetValue(ip, out var hit) &&
+        // fresh=true skips the cache (Test button) so a stale "offline"
+        // from before the receiver started can't mislead.
+        if (!fresh && _detectCache.TryGetValue(ip, out var hit) &&
             (DateTime.UtcNow - hit.At).TotalSeconds < 60)
             return hit.Mode;
         string mode = await DetectUncachedAsync(ip);
