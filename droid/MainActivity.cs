@@ -877,13 +877,13 @@ public sealed class MainActivity : Activity
                 bd.SetCornerRadius(Dp(8));
                 if (badgeTxt == "PS5")
                 {
-                    bd.SetColor(Dyn("colorPrimaryContainer", Color.ParseColor("#EADDFF")));
-                    badge.SetTextColor(Dyn("colorOnPrimaryContainer", Color.ParseColor("#4F378B")));
+                    bd.SetColor(Color.White);
+                    badge.SetTextColor(Color.Black);
                 }
                 else if (badgeTxt == "PS4")
                 {
-                    bd.SetColor(Dyn("colorSecondaryContainer", Color.ParseColor("#CCC2DC")));
-                    badge.SetTextColor(Dyn("colorOnSecondaryContainer", Color.ParseColor("#332D41")));
+                    bd.SetColor(Color.ParseColor("#0D6EFD"));
+                    badge.SetTextColor(Color.White);
                 }
                 else
                 {
