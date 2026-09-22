@@ -717,6 +717,14 @@ public sealed class MainActivity : Activity
                 pkg = WithSize(pkg, it.Size);
             bool isPs4 = (pkg?.Platform ?? "").StartsWith("PS4");
 
+            // cover for the console install notification (console fetches it)
+            string? iconUrl = null;
+            if (it.Icon is { Length: > 0 })
+            {
+                _server.RegisterIcon("pkg", it.Icon);
+                iconUrl = _server.IconUrlFor(pcIp, "pkg");
+            }
+
             // disc images go to /data/homebrew via receiver pull, not install
             if (it.Format != "pkg")
             {
@@ -728,7 +736,7 @@ public sealed class MainActivity : Activity
                 return pok;
             }
 
-            var (ok, reply) = await Ps4Installer.PushRpiAsync(psIp, url, it.Title);
+            var (ok, reply) = await Ps4Installer.PushRpiAsync(psIp, url, it.Title, iconUrl);
             string method = "rpi";
             if (!ok && isPs4 && pkg != null)
             {
