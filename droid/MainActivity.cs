@@ -715,11 +715,14 @@ public sealed class MainActivity : Activity
     /// phone progress bar, then byte-verify the landed file. False on
     /// stall, drop, or size mismatch.
     /// </summary>
+    long LastPullGot;
+
     async Task<bool> TrackPullAsync(string psIp, string remote, LibItem it)
     {
         long t0 = System.Environment.TickCount64;
         long lastGot = 0;
         long lastTick = t0;
+        RangeFileServer? srv = _server;
         try
         {
             while (true)
@@ -727,12 +730,16 @@ public sealed class MainActivity : Activity
                 await Task.Delay(1000);
                 var (active, name, got, want, paused) =
                     await ConsoleClient.GetPullAsync(psIp);
+                LastPullGot = got;
                 if (!active) break;
                 long now = System.Environment.TickCount64;
                 double sec = Math.Max(1, now - lastTick) / 1000.0;
                 double spd = (got - lastGot) / 1048576.0 / sec;
                 lastTick = now; lastGot = got;
                 long g = got, w = want;
+                long served = 0;
+                try { served = srv?.ServedFor("pkg") ?? 0; } catch { }
+                long sv = served;
                 RunOnUiThread(() =>
                 {
                     if (w > 0)
@@ -740,7 +747,7 @@ public sealed class MainActivity : Activity
                         _prog!.Max = 1000;
                         _prog.SetProgressCompat((int)Math.Min(1000, 1000L * g / w), false);
                     }
-                    Say($"copying… {g / 1048576.0:0}/{w / 1048576.0:0} MB ({(w > 0 ? 100.0 * g / w : 0):0}%, {spd:0.0} MB/s){(paused ? " — paused" : "")}");
+                    Say($"copying… {g / 1048576.0:0}/{w / 1048576.0:0} MB ({(w > 0 ? 100.0 * g / w : 0):0}%, {spd:0.0} MB/s, served {sv / 1048576.0:0}){(paused ? " — paused" : "")}");
                 });
                 SetState(it, $"copying {100.0 * got / Math.Max(1, want):0}%");
                 if (now - t0 > 6 * 60 * 60 * 1000L) return false;
@@ -753,6 +760,51 @@ public sealed class MainActivity : Activity
             if (exists && size == it.Size) return true;
             Say($"landed size mismatch (console {size}, want {it.Size})");
             return false;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Follow a PKG install's download off our server: the receiver only
+    /// reports busy/active, so served-bytes is the progress signal. True
+    /// once the console pulled the full file (local install continues).
+    /// </summary>
+    async Task<bool> TrackInstallAsync(string psIp, RangeFileServer? srv, LibItem it)
+    {
+        long t0 = System.Environment.TickCount64;
+        long lastServed = 0;
+        long prevServed = 0;
+        long prevTick = t0;
+        long stallSince = t0;
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(1000);
+                long served = 0;
+                try { served = srv?.ServedFor("pkg") ?? 0; } catch { }
+                long now = System.Environment.TickCount64;
+                if (served > lastServed)
+                {
+                    lastServed = served;
+                    stallSince = now;
+                }
+                double sec = Math.Max(1, now - prevTick) / 1000.0;
+                double spd = (served - prevServed) / 1048576.0 / sec;
+                prevServed = served; prevTick = now;
+                long s = Math.Min(served, it.Size);
+                double pct = it.Size > 0 ? 100.0 * s / it.Size : 0;
+                RunOnUiThread(() =>
+                {
+                    _prog!.Max = 1000;
+                    _prog.SetProgressCompat((int)Math.Min(1000, pct * 10), false);
+                    Say($"installing… {s / 1048576.0:0}/{it.Size / 1048576.0:0} MB ({pct:0}%, {spd:0.0} MB/s)");
+                });
+                SetState(it, $"sending {pct:0}%");
+                if (served >= it.Size && it.Size > 0) return true;
+                if (now - stallSince > 120000) return served >= it.Size && it.Size > 0;
+                if (now - t0 > 6 * 60 * 60 * 1000L) return false;
+            }
         }
         catch { return false; }
     }
@@ -831,20 +883,32 @@ public sealed class MainActivity : Activity
 
             // disc images go to /data/homebrew via receiver pull, not install.
             // Poll the receiver's pull status so the phone shows live progress.
+            // The receiver has no segment retry: re-pull resumes partials.
             if (it.Format != "pkg")
             {
                 string remote = "/data/homebrew/" + it.FileName;
-                Say($"copying {it.FileName} to console…");
-                var (pok, preply) = await ConsoleClient.PullAsync(psIp, url, remote, resume: true);
-                if (!pok)
+                for (int attempt = 1; attempt <= 6; attempt++)
                 {
-                    SetState(it, "failed");
-                    Say($"copy failed: {Short(preply)}");
-                    return false;
+                    if (attempt > 1)
+                        Say($"retrying copy from {SizeStr(Math.Min(it.Size, LastPullGot))}… ({attempt}/6)");
+                    else
+                        Say($"copying {it.FileName} to console…");
+                    var (pok, preply) = await ConsoleClient.PullAsync(psIp, url, remote, resume: true);
+                    if (!pok)
+                    {
+                        SetState(it, "failed");
+                        Say($"copy failed: {Short(preply)}");
+                        return false;
+                    }
+                    if (await TrackPullAsync(psIp, remote, it))
+                    {
+                        SetState(it, "done");
+                        return true;
+                    }
                 }
-                bool landed = await TrackPullAsync(psIp, remote, it);
-                SetState(it, landed ? "done" : "failed");
-                return landed;
+                SetState(it, "failed");
+                Say("copy stalled after 6 tries — check console space/Wi-Fi");
+                return false;
             }
 
             var (ok, reply) = await Ps4Installer.PushRpiAsync(psIp, url, it.Title, iconUrl);
@@ -855,8 +919,15 @@ public sealed class MainActivity : Activity
                 var g = await Ps4Installer.PushGoldHenAsync(psIp, pcIp, _server.ManifestUrlFor(pcIp, "pkg"), pkg, ServerPort);
                 ok = g.Ok; reply = g.Reply; method = "goldhen";
             }
-            if (!ok) SetState(it, "failed");
-            return ok;
+            if (!ok)
+            {
+                SetState(it, "failed");
+                return false;
+            }
+            // install accepted: follow the console's download off our server
+            bool downloaded = await TrackInstallAsync(psIp, _server, it);
+            SetState(it, downloaded ? "done" : "failed");
+            return downloaded;
         }
         catch { SetState(it, "failed"); return false; }
     }
