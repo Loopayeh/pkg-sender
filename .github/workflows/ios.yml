@@ -25,7 +25,7 @@ jobs:
       - name: Build unsigned IPA
         run: >
           dotnet publish ios/PkgSender.iOS.csproj -c Release -r ios-arm64
-          /p:BuildIpa=true /p:CodesignKey="" /p:CodesignProvision=""
+          /p:BuildIpa=true /p:CodesignKey="-"
           /p:CheckEolWorkloads=false
           --nologo
 
