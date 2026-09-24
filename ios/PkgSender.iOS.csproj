@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-ios</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <ApplicationId>com.loopayeh.pkgsender</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0.0</ApplicationDisplayVersion>
+    <SupportedOSPlatformVersion>16.0</SupportedOSPlatformVersion>
+    <CodesignKey>Apple Development</CodesignKey>
+    <!-- Bundle signing happens on a Mac with Xcode; Windows builds unsigned for TestFlight upload via Transporter -->
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LoopDPI.Core\LoopDPI.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- reuse the same bundled receiver as Android -->
+    <EmbeddedResource Include="..\droid\pkg-receiver.elf">
+      <LogicalName>pkg-receiver.elf</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\droid\logo.png">
+      <LogicalName>logo.png</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

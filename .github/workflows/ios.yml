@@ -1,0 +1,41 @@
+name: iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios/**'
+      - 'LoopDPI.Core/**'
+      - '.github/workflows/ios.yml'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install iOS workload
+        run: dotnet workload install ios
+
+      - name: Build unsigned IPA
+        run: >
+          dotnet publish ios/PkgSender.iOS.csproj -c Release -r ios-arm64
+          /p:BuildIpa=true /p:CodesignKey="" /p:CodesignProvision=""
+          --nologo
+
+      - name: Rename IPA
+        run: |
+          VER=$(grep -oPm1 '(?<=<ApplicationDisplayVersion>)[^<]+' ios/PkgSender.iOS.csproj || echo 1.0.1)
+          cp ios/bin/Release/net8.0-ios/ios-arm64/publish/*.ipa "PkgSender-${VER}-ios-unsigned.ipa"
+          ls -la *.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: 'PkgSender-*-ios-unsigned.ipa'

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key><string>PKG Sender</string>
+  <key>CFBundleIdentifier</key><string>com.loopayeh.pkgsender</string>
+  <key>LSRequiresIPhoneOS</key><true/>
+  <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+  <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
+  <key>NSLocalNetworkUsageDescription</key><string>PKG Sender finds your PS4/PS5 on the local network and serves game files to it over HTTP.</string>
+  <key>NSBonjourServices</key><array><string>_http._tcp</string></array>
+  <key>UIBackgroundModes</key><array><string>fetch</string></array>
+  <key>UIFileSharingEnabled</key><true/>
+  <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+</dict>
+</plist>
