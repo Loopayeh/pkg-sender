@@ -26,6 +26,7 @@ jobs:
         run: >
           dotnet publish ios/PkgSender.iOS.csproj -c Release -r ios-arm64
           /p:BuildIpa=true /p:CodesignKey="" /p:CodesignProvision=""
+          /p:CheckEolWorkloads=false
           --nologo
 
       - name: Rename IPA
