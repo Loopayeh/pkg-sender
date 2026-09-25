@@ -1,0 +1,54 @@
+name: Linux .deb
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'library/**'
+      - 'LoopDPI.Core/**'
+      - 'payload/pkg-receiver.elf'
+      - '.github/workflows/linux-deb.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish linux-x64 (self-contained, single file)
+        run: >
+          dotnet publish library/PkgSender.csproj -c Release -r linux-x64
+          --self-contained true /p:PublishSingleFile=true
+          /p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish --nologo -v q
+
+      - name: Stage .deb tree
+        run: |
+          VER=$(sed -n 's/.*<Version>\([^<]*\)<.*/\1/p' library/PkgSender.csproj | head -1); VER=${VER:-1.1.3}
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          DEST=pkgdeb/usr/lib/pkgsender
+          mkdir -p "$DEST" "pkgdeb/usr/bin" "pkgdeb/usr/share/applications" "pkgdeb/usr/share/icons/hicolor/256x256/apps" "pkgdeb/DEBIAN"
+          cp publish/PkgSender "$DEST/pkgsender"
+          chmod 0755 "$DEST/pkgsender"
+          cp payload/pkg-receiver.elf "$DEST/" 2>/dev/null || true
+          cp library/Assets/logo.png "pkgdeb/usr/share/icons/hicolor/256x256/apps/pkgsender.png"
+          printf '#!/bin/sh\nexec /usr/lib/pkgsender/pkgsender "$@"\n' > "pkgdeb/usr/bin/pkgsender"
+          chmod 0755 "pkgdeb/usr/bin/pkgsender"
+          printf '[Desktop Entry]\nName=PKG Sender\nComment=Send PS4/PS5 packages over LAN\nExec=pkgsender\nIcon=pkgsender\nTerminal=false\nType=Application\nCategories=Utility;\n' > "pkgdeb/usr/share/applications/pkgsender.desktop"
+          printf 'Package: pkgsender\nVersion: %s\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: Loopayeh <https://github.com/Loopayeh>\nDescription: Send PS4/PS5 PKG files to a console over LAN.\n Self-contained Avalonia desktop app, no .NET runtime needed.\n' "$VER" > "pkgdeb/DEBIAN/control"
+
+      - name: Build .deb
+        run: |
+          dpkg-deb --build pkgdeb "PkgSender-${VER}-linux-amd64.deb"
+          ls -la *.deb
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: 'PkgSender-*-linux-amd64.deb'
