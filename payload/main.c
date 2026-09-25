@@ -55,6 +55,8 @@
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysctl.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -93,35 +95,75 @@ notify_user(const char *msg)
 
 /* -- Console LAN IP --------------------------------------------------
  * The listener binds INADDR_ANY so it never learns its own address.
- * Trick: connect() a UDP socket at 8.8.8.8:53 (sends nothing), then
- * getsockname() reveals the local interface address used for LAN. */
+ * Primary: enumerate interfaces via SIOCGIFCONF and take the first
+ * AF_INET address on an UP, non-loopback interface. Needs no routing,
+ * gateway, DNS or internet, so it works on offline LAN consoles.
+ * Secondary fallback: connect() a UDP socket at 8.8.8.8:53 (sends
+ * nothing), then getsockname() reveals the LAN source address. */
 static char g_lan_ip[64] = "";
 
 static void
 resolve_lan_ip(void)
 {
 	int fd = socket(AF_INET, SOCK_DGRAM, 0);
-	struct sockaddr_in dst, local;
-	socklen_t llen;
+	struct ifconf ifc;
+	struct ifreq *ifr;
+	char buf[1024];
+	int n, i;
 
 	if (fd < 0)
 		return;
-	memset(&dst, 0, sizeof(dst));
-	dst.sin_family = AF_INET;
-	dst.sin_port = htons(53);
-	dst.sin_addr.s_addr = htonl(0x08080808); /* 8.8.8.8, no packet sent */
-	if (connect(fd, (struct sockaddr *)&dst, sizeof(dst)) != 0) {
+	/* Primary: interface enumeration (routing-independent). */
+	memset(&ifc, 0, sizeof(ifc));
+	ifc.ifc_len = sizeof(buf);
+	ifc.ifc_buf = buf;
+	if (ioctl(fd, SIOCGIFCONF, &ifc) == 0) {
+		n = ifc.ifc_len / sizeof(struct ifreq);
+		ifr = ifc.ifc_req;
+		for (i = 0; i < n; i++) {
+			struct sockaddr_in *a;
+			if (ifr[i].ifr_addr.sa_family != AF_INET)
+				continue;
+			if (ioctl(fd, SIOCGIFFLAGS, &ifr[i]) != 0)
+				continue;
+			if (!(ifr[i].ifr_flags & IFF_UP) ||
+			    (ifr[i].ifr_flags & IFF_LOOPBACK))
+				continue;
+			a = (struct sockaddr_in *)&ifr[i].ifr_addr;
+			if (a->sin_addr.s_addr == htonl(INADDR_LOOPBACK) ||
+			    a->sin_addr.s_addr == htonl(INADDR_ANY))
+				continue;
+			inet_ntop(AF_INET, &a->sin_addr,
+			    g_lan_ip, sizeof(g_lan_ip));
+			break;
+		}
+	}
+	if (g_lan_ip[0]) {
 		close(fd);
 		return;
 	}
-	llen = sizeof(local);
-	memset(&local, 0, sizeof(local));
-	if (getsockname(fd, (struct sockaddr *)&local, &llen) == 0 &&
-	    local.sin_family == AF_INET &&
-	    local.sin_addr.s_addr != htonl(INADDR_LOOPBACK) &&
-	    local.sin_addr.s_addr != htonl(INADDR_ANY))
-		inet_ntop(AF_INET, &local.sin_addr, g_lan_ip, sizeof(g_lan_ip));
-	close(fd);
+	/* Secondary fallback: route-based lookup (needs internet route). */
+	{
+		struct sockaddr_in dst, local;
+		socklen_t llen;
+
+		memset(&dst, 0, sizeof(dst));
+		dst.sin_family = AF_INET;
+		dst.sin_port = htons(53);
+		dst.sin_addr.s_addr = htonl(0x08080808); /* 8.8.8.8, no packet sent */
+		if (connect(fd, (struct sockaddr *)&dst, sizeof(dst)) != 0) {
+			close(fd);
+			return;
+		}
+		llen = sizeof(local);
+		memset(&local, 0, sizeof(local));
+		if (getsockname(fd, (struct sockaddr *)&local, &llen) == 0 &&
+		    local.sin_family == AF_INET &&
+		    local.sin_addr.s_addr != htonl(INADDR_LOOPBACK) &&
+		    local.sin_addr.s_addr != htonl(INADDR_ANY))
+			inet_ntop(AF_INET, &local.sin_addr, g_lan_ip, sizeof(g_lan_ip));
+		close(fd);
+	}
 }
 
 /* ── SCE AppInstUtil ABI (same layout websrv/ftpsrv use) ─────────────── */
