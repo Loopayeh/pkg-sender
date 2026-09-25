@@ -6,6 +6,12 @@
 
 Get `PkgSender-Setup-X.Y.Z.exe` from [Releases](../../releases) — self-contained, no .NET needed, no admin needed.
 
+On Linux: the `.deb` from the CI workflow installs to `/usr/lib/pkgsender` with a `pkgsender` menu entry; the portable `PkgSender-X.Y.Z-linux-x64.tar.gz` and `PkgSender-X.Y.Z-linux-x64.AppImage` run from anywhere. All are self-contained, no .NET needed:
+
+```sh
+tar -xzf PkgSender-X.Y.Z-linux-x64.tar.gz && ./PkgSender
+```
+
 > ⚠ **`pkg-receiver.elf` is PS5 ONLY.** PS4 does NOT need any ELF — it uses
 > Remote Package Installer or GoldHEN (see [Tutorial — PS4](#tutorial--ps4)).
 > Sending the ELF to a PS4 will not work.
@@ -123,7 +129,7 @@ PC ───────── Ethernet ───────── PS5/PS4
 
 Because there is no router providing DHCP, you must manually assign an IP address to both devices.
 
-**1. Set the PC IP address.** On Windows: Settings → Network & Internet → Ethernet → IP assignment → Edit. Select Manual, enable IPv4, and enter:
+**1. Set the PC IP address.** On Windows: Settings → Network & Internet → Ethernet → IP assignment → Edit. Select Manual, enable IPv4, and enter (on Linux, use the IPv4 → Manual tab of your network settings, e.g. NetworkManager):
 
 - IP address: `192.168.10.1`
 - Subnet mask: `255.255.255.0`
@@ -234,7 +240,7 @@ If you enjoy what I build and want to support my work, you can donate — every 
 
 - **● No receiver (red)** — the elf isn't running on the console. Send it again. On the console page, `page X • receiver Y` mismatch means the same thing.
 - **○ No network (gray)** — this PC has no active LAN/Wi-Fi.
-- **Push goes through but download never starts** — allow inbound TCP port 9898 in Windows Firewall (the installer adds this rule plus UDP 12801 for beacons).
+- **Push goes through but download never starts** — allow inbound TCP port 9898: on Windows in Windows Firewall (the installer adds this rule plus UDP 12801 for beacons); on Linux, e.g. `sudo ufw allow 9898/tcp` or `sudo firewall-cmd --permanent --add-port=9898/tcp`.
 - **Console IP keeps changing (DHCP)** — reopen the app or hit Detect; it offers the new address.
 - **Image cards without covers** — the header bridge needs `pkgviewer.py` next to the installed app (ships since 1.2.5) plus a Python with `mkpfs`; rescan after installing.
 
@@ -252,6 +258,22 @@ This publishes a self-contained single-file build to `dist\`, copies in `pkg-rec
 cd payload && make PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk
 ```
 
+On Linux the tar.gz and AppImage artifacts build with .NET 8 SDK only (`DOTNET=/path/to/dotnet ./Build-Release.sh` if the SDK is not on `PATH`):
+
+```sh
+./Build-Release.sh
+```
+
+This publishes linux-x64 to `dist/` and produces `PkgSender-X.Y.Z-linux-x64.tar.gz` and `.AppImage` there (the AppImage step downloads `appimagetool` when it is not installed). The `.deb` is built separately by the `Linux .deb` CI workflow.
+
+Automated tests (updater version/asset/network logic and the Linux tar.gz self-update contract) run with:
+
+```sh
+dotnet test tests/coretests/CoreTests.csproj
+```
+
 ## How updates work
 
 The app checks GitHub releases for a `PkgSender-Setup-*.exe` asset newer than its own version. **Download + Install** fetches it to a temp dir, launches it silent, and exits so Setup can overwrite the running app.
+
+On Linux it looks for the `PkgSender-*-linux-x64.tar.gz` asset instead: a portable (tar.gz) install is swapped in place — the new binary lands next to the old one (kept as `PkgSender.old`, removed on next start) and the app restarts itself. The official `.deb` and AppImage installs skip the in-place swap and ask for the usual package/update path.
