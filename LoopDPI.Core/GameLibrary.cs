@@ -689,14 +689,20 @@ public static class PythonHeader
             {
                 FileName = python,
                 // Icon goes to a temp file so stdout stays tiny (no pipe pressure).
-                Arguments = "\"" + bridge + "\" \"" + path + "\"" +
-                    (iconTmp != null ? " --icon-out \"" + iconTmp + "\"" : ""),
+                // argv as a list: paths with spaces/quotes must never re-parse.
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 StandardOutputEncoding = Encoding.UTF8,
             };
+            psi.ArgumentList.Add(bridge);
+            psi.ArgumentList.Add(path);
+            if (iconTmp != null)
+            {
+                psi.ArgumentList.Add("--icon-out");
+                psi.ArgumentList.Add(iconTmp);
+            }
             using var p = Process.Start(psi);
             if (p == null)
                 return null;
