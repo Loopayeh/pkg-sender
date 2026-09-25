@@ -159,7 +159,11 @@ public static class Ps4Installer
     {
         try
         {
-            string enc = Uri.EscapeDataString(fileUrl.Replace("https://", "http://"));
+            // Issue #6: URLs with spaces/special chars failed on the console.
+            // Packages were already percent-encoded; icon_url was not, and the
+            // receiver never decoded it. Encode both exactly once so the
+            // receiver's url_decode yields a usable URL either way.
+            string enc = EncodeUrlOnce(fileUrl.Replace("https://", "http://"));
             // Same shape as ConsoleClient.PushAsync: our own receiver (which
             // also answers the RPI probe) shows name/cover from these; a real
             // RPI just ignores the extra fields.
@@ -168,7 +172,7 @@ public static class Ps4Installer
             if (!string.IsNullOrWhiteSpace(name))
                 sb.Append(",\"name\":\"").Append(RpiEscape(name)).Append('"');
             if (!string.IsNullOrWhiteSpace(iconUrl))
-                sb.Append(",\"icon_url\":\"").Append(RpiEscape(iconUrl)).Append('"');
+                sb.Append(",\"icon_url\":\"").Append(RpiEscape(EncodeUrlOnce(iconUrl))).Append('"');
             sb.Append('}');
             string json = sb.ToString();
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -181,6 +185,14 @@ public static class Ps4Installer
 
     private static string RpiEscape(string s) =>
         s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");
+
+    /// <summary>
+    /// Percent-encode a URL exactly once (issue #6). Plain EscapeDataString
+    /// would double-encode an already-encoded URL (% -> %25); unescaping
+    /// first keeps idempotent behaviour for both raw and encoded input.
+    /// </summary>
+    internal static string EncodeUrlOnce(string url) =>
+        Uri.EscapeDataString(Uri.UnescapeDataString(url));
 
     // ---- GoldHEN path: inject ps4_dpi_payload.bin, then send PKG info ----
 

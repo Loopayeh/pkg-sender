@@ -64,14 +64,16 @@ public static class ConsoleClient
     public static async Task<(bool Ok, string Reply)> PushAsync(string psIp, string url, string? name = null, string? iconUrl = null)
     {
         // LoopDPI + RPI both accept this shape; URL travels encoded.
-        string enc = Uri.EscapeDataString(url.Replace("https://", "http://"));
+        // Issue #6: icon_url must be encoded exactly like packages, otherwise
+        // spaces/special chars fail the install on the console.
+        string enc = Ps4Installer.EncodeUrlOnce(url.Replace("https://", "http://"));
         string json = $"{{\"type\":\"direct\",\"packages\":[\"{enc}\"]}}";
         if (!string.IsNullOrWhiteSpace(name))
             json = $"{{\"type\":\"direct\",\"packages\":[\"{enc}\"],\"name\":\"{JsonEscape(name)}\"}}";
         if (!string.IsNullOrWhiteSpace(iconUrl))
         {
             // Insert icon_url before the closing brace.
-            json = json[..^1] + $",\"icon_url\":\"{JsonEscape(iconUrl)}\"}}";
+            json = json[..^1] + $",\"icon_url\":\"{JsonEscape(Ps4Installer.EncodeUrlOnce(iconUrl))}\"}}";
         }
         string? body = await PostAnyAsync(psIp, "/api/install", json);
         try

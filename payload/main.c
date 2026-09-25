@@ -571,6 +571,29 @@ url_decode(const char *src, char *dst, size_t dst_sz)
 	dst[o] = '\0';
 }
 
+/* raw spaces/tabs in a URL break the console installer: turn them into
+ * %20 after decoding (issue #6). Only the unsafe whitespace is touched,
+ * everything else passes through byte-identical. */
+static void
+url_encode_spaces(const char *src, char *dst, size_t dst_sz)
+{
+	size_t o = 0;
+
+	while (*src && o + 1 < dst_sz) {
+		if (*src == ' ' || *src == '\t') {
+			if (o + 3 >= dst_sz)
+				break;
+			dst[o++] = '%';
+			dst[o++] = '2';
+			dst[o++] = '0';
+			src++;
+		} else {
+			dst[o++] = *src++;
+		}
+	}
+	dst[o] = '\0';
+}
+
 /* first http(s):// token in buf -> dst (stops at ws, quote, <, \r, \n). */
 static int
 grab_http_url(const char *buf, char *dst, size_t dst_sz)
@@ -2332,11 +2355,21 @@ handle_client(int fd)
 		char gicon[512];
 
 		if (json_first_package(body, url, sizeof(url))) {
+			char url_fixed[URL_MAX];
 			gname[0] = '\0';
 			gicon[0] = '\0';
 			json_string(body, "name", gname, sizeof(gname));
 			json_string(body, "icon_url", gicon, sizeof(gicon));
-			if (queue_install(url, gname[0] ? gname : NULL,
+			/* icon_url arrives percent-encoded like packages (issue #6);
+			 * decode it symmetrically, then make any leftover raw
+			 * whitespace safe for the console installer. */
+			if (gicon[0]) {
+				char icon_dec[512];
+				url_decode(gicon, icon_dec, sizeof(icon_dec));
+				url_encode_spaces(icon_dec, gicon, sizeof(gicon));
+			}
+			url_encode_spaces(url, url_fixed, sizeof(url_fixed));
+			if (queue_install(url_fixed, gname[0] ? gname : NULL,
 			                  gicon[0] ? gicon : NULL) == 0)
 				send_json(fd, "{\"status\":\"success\"}");
 			else
