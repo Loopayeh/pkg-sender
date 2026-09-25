@@ -795,7 +795,8 @@ public static class PythonHeader
         var cands = new List<string>();
         try { cands.Add(Path.Combine(AppContext.BaseDirectory, "pkg_header.py")); } catch { }
         try { cands.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PkgSender", "pkg_header.py")); } catch { }
-        cands.Add(@"D:\OpenCode\pkg-sender\library\pkg_header.py");
+        if (OperatingSystem.IsWindows())
+            cands.Add(@"D:\OpenCode\pkg-sender\library\pkg_header.py");
         foreach (var c in cands)
         {
             try { if (File.Exists(c)) { _bridge = c; return c; } } catch { }

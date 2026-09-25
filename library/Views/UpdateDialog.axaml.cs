@@ -55,6 +55,15 @@ public partial class UpdateDialog : Window
         }
         prog.Text = "Installing — the app will close…";
         await Task.Delay(500);
+        if (OperatingSystem.IsLinux())
+        {
+            prog.Text = "Updating — the app will restart…";
+            if (UpdateService.RunTarGzUpdateAndExit(dest))
+                Environment.Exit(0);
+            prog.Text = "Update failed (only tar.gz installs can self-update; use your package manager).";
+            btn.IsEnabled = true;
+            return;
+        }
         if (UpdateService.RunSetupAndExit(dest))
             Environment.Exit(0);
         prog.Text = "Could not launch the installer.";

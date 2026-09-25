@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -210,12 +211,13 @@ public static class Ps4Installer
                 return ms.ToArray();
             }
         }
-        string[] candidates =
+        var candidates = new List<string>
         {
             Path.Combine(AppContext.BaseDirectory, "ps4_dpi_payload.bin"),
             "/app/pkg-sender/LoopDPI.Core/ps4_dpi_payload.bin",
-            "D:\\OpenCode\\pkg-sender\\LoopDPI.Core\\ps4_dpi_payload.bin",
         };
+        if (OperatingSystem.IsWindows())
+            candidates.Add("D:\\OpenCode\\pkg-sender\\LoopDPI.Core\\ps4_dpi_payload.bin");
         foreach (var p in candidates)
             if (File.Exists(p)) return File.ReadAllBytes(p);
         return Array.Empty<byte>();
