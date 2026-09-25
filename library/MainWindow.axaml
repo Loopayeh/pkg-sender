@@ -4,6 +4,6 @@
         x:Class="PkgSender.MainWindow"
         Title="PKG Sender • by Loopayeh" Width="1200" Height="700"
         MinWidth="1140" MinHeight="560" Icon="/Assets/logo.ico"
-        Background="#171717" FontFamily="Segoe UI">
+        Background="#171717" FontFamily="Segoe UI, Inter">
     <views:LibraryView/>
 </Window>

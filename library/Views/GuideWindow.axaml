@@ -3,7 +3,7 @@
         x:Class="PkgSender.Views.GuideWindow"
          Title="PKG Sender guide" Width="480" Height="560"
         CanResize="False" ShowInTaskbar="False"
-        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
+        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI, Inter"
         WindowStartupLocation="CenterOwner">
   <Grid RowDefinitions="*,Auto" Margin="24,20">
     <ScrollViewer Grid.Row="0">
@@ -27,29 +27,29 @@
         <TextBlock Text="Method 1 — Through a router" FontSize="13" FontWeight="Bold" Margin="0,4,0,0"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="The easiest option — connect both your PC and console to the same router."/>
-        <TextBlock FontSize="12" Foreground="#8B93A5" FontFamily="Consolas"
+        <TextBlock FontSize="12" Foreground="#8B93A5" FontFamily="Consolas, monospace"
           Text="PC ─────┐&#x0a;        ├── Router&#x0a;PS5/PS4 ┘"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="No manual IP setup needed: join the PC (Ethernet or Wi-Fi) and the console to the same router, start the PKG Receiver on the console, open PKG Sender — it discovers the console automatically."/>
         <TextBlock Text="Method 2 — Direct cable" FontSize="13" FontWeight="Bold" Margin="0,4,0,0"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="PC straight to console with an Ethernet cable, no router. With no DHCP around, set static addresses on both ends."/>
-        <TextBlock FontSize="12" Foreground="#8B93A5" FontFamily="Consolas"
+        <TextBlock FontSize="12" Foreground="#8B93A5" FontFamily="Consolas, monospace"
           Text="PC ───── Ethernet ───── PS5/PS4&#x0a;192.168.10.1          192.168.10.2"/>
-        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5" Name="DirectPcStep"
           Text="1) PC — Windows Settings → Network &amp; Internet → Ethernet → IP assignment → Edit. Manual + IPv4: 192.168.10.1 / mask 255.255.255.0, gateway and DNS empty."/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="2) Console — Network settings → manual IP: 192.168.10.2 / mask 255.255.255.0, gateway and DNS empty."/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="3) Start the PKG Receiver on the console, then PKG Sender on the PC — in the app pick the PC address, type the console IP, press Test."/>
         <TextBlock TextWrapping="Wrap" FontSize="12" FontWeight="Bold" Foreground="#E8A34C"
-          Text="⚠ Do NOT leave a direct cable on automatic IP: Windows or the console may fall back to 169.254.x.x, which PKG Sender ignores on purpose. If the cable is in but nothing is found, this is almost always the cause — set the static addresses above."/>
+          Text="⚠ Do NOT leave a direct cable on automatic IP: the PC or the console may fall back to 169.254.x.x, which PKG Sender ignores on purpose. If the cable is in but nothing is found, this is almost always the cause — set the static addresses above."/>
         <TextBlock Text="Troubleshooting" FontSize="16" FontWeight="Bold" Margin="0,8,0,0"/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="• “No receiver” — the elf is not running on the console. Send it again."/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="• “No network adapter” — this PC has no active LAN/Wi-Fi. Check cable or Wi-Fi."/>
-        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
+        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5" Name="FirewallTip"
           Text="• Push goes through but the download never starts — allow inbound TCP port 9898 in Windows Firewall (the installer adds this rule)."/>
         <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#8B93A5"
           Text="• Console IP changes often (DHCP) — just reopen the app; it will offer the new address."/>

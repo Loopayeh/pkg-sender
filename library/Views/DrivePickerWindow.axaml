@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="PkgSender.Views.DrivePickerWindow"
         Title="Select drives to scan" Width="480" Height="440"
-        Foreground="#F1F3F8" Background="#171717" FontFamily="Segoe UI"
+        Foreground="#F1F3F8" Background="#171717" FontFamily="Segoe UI, Inter"
         WindowStartupLocation="CenterOwner">
   <Grid RowDefinitions="Auto,*,Auto" Margin="16">
     <TextBlock Grid.Row="0" Text="Tick the drives to scan for games:" FontSize="13" FontWeight="Bold" Foreground="#F1F3F8" Margin="0,0,0,10"/>

@@ -3,7 +3,7 @@
         x:Class="PkgSender.Views.UpdateDialog"
         Title="Update available" Width="440" Height="380"
         CanResize="False" ShowInTaskbar="False"
-        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
+        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI, Inter"
         WindowStartupLocation="CenterOwner">
   <Window.Styles>
     <Style Selector="Button.ghost">

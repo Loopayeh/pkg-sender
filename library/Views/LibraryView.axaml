@@ -6,7 +6,7 @@
              xmlns:views="clr-namespace:PkgSender.Views"
              mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="700"
              x:Class="PkgSender.Views.LibraryView"
-             Foreground="#F1F3F8" Background="#171717" FontFamily="Segoe UI">
+             Foreground="#F1F3F8" Background="#171717" FontFamily="Segoe UI, Inter">
   <UserControl.Resources>
     <views:Ps5CardBackgroundConverter x:Key="Ps5CardBg"/>
     <views:Ps5ImageBackgroundConverter x:Key="Ps5ImgBg"/>
