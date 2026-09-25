@@ -107,35 +107,46 @@ resolve_lan_ip(void)
 {
 	int fd = socket(AF_INET, SOCK_DGRAM, 0);
 	struct ifconf ifc;
-	struct ifreq *ifr;
 	char buf[1024];
-	int n, i;
 
 	if (fd < 0)
 		return;
-	/* Primary: interface enumeration (routing-independent). */
+	/* Primary: interface enumeration (routing-independent).
+	 * NOTE: ifreq entries are variable-length on BSD (sa_len);
+	 * never index them as a fixed array. Step with the SDK's
+	 * _SIZEOF_ADDR_IFREQ macro instead. */
 	memset(&ifc, 0, sizeof(ifc));
 	ifc.ifc_len = sizeof(buf);
 	ifc.ifc_buf = buf;
 	if (ioctl(fd, SIOCGIFCONF, &ifc) == 0) {
-		n = ifc.ifc_len / sizeof(struct ifreq);
-		ifr = ifc.ifc_req;
-		for (i = 0; i < n; i++) {
+		char *cp = buf;
+		char *end = buf + ifc.ifc_len;
+		while (cp + sizeof(struct ifreq) -
+		    sizeof(struct sockaddr) < end) {
+			struct ifreq *r = (struct ifreq *)cp;
 			struct sockaddr_in *a;
-			if (ifr[i].ifr_addr.sa_family != AF_INET)
-				continue;
-			if (ioctl(fd, SIOCGIFFLAGS, &ifr[i]) != 0)
-				continue;
-			if (!(ifr[i].ifr_flags & IFF_UP) ||
-			    (ifr[i].ifr_flags & IFF_LOOPBACK))
-				continue;
-			a = (struct sockaddr_in *)&ifr[i].ifr_addr;
-			if (a->sin_addr.s_addr == htonl(INADDR_LOOPBACK) ||
-			    a->sin_addr.s_addr == htonl(INADDR_ANY))
-				continue;
-			inet_ntop(AF_INET, &a->sin_addr,
-			    g_lan_ip, sizeof(g_lan_ip));
-			break;
+			size_t sz;
+			if (r->ifr_addr.sa_len == 0)
+				break;		/* corrupt/truncated tail */
+			sz = _SIZEOF_ADDR_IFREQ(*r);
+			if ((size_t)(end - cp) < sz)
+				break;		/* don't overrun the buffer */
+			if (r->ifr_addr.sa_family == AF_INET) {
+				if (ioctl(fd, SIOCGIFFLAGS, r) == 0 &&
+				    (r->ifr_flags & IFF_UP) &&
+				    !(r->ifr_flags & IFF_LOOPBACK)) {
+					a = (struct sockaddr_in *)&r->ifr_addr;
+					if (a->sin_addr.s_addr !=
+					    htonl(INADDR_LOOPBACK) &&
+					    a->sin_addr.s_addr !=
+					    htonl(INADDR_ANY)) {
+						inet_ntop(AF_INET, &a->sin_addr,
+						    g_lan_ip, sizeof(g_lan_ip));
+						break;
+					}
+				}
+			}
+			cp += sz;
 		}
 	}
 	if (g_lan_ip[0]) {
