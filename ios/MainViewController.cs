@@ -58,6 +58,9 @@ public sealed class MainViewController : UIViewController
             Spacing = 12,
             TranslatesAutoresizingMaskIntoConstraints = false,
         };
+        // Keep LTR even on RTL system locales; otherwise the stack shifts half off-screen.
+        scroll.SemanticContentAttribute = UISemanticContentAttribute.ForceLeftToRight;
+        stack.SemanticContentAttribute = UISemanticContentAttribute.ForceLeftToRight;
         View.AddSubview(scroll);
         scroll.AddSubview(stack);
         NSLayoutConstraint.ActivateConstraints(new[]
@@ -84,7 +87,9 @@ public sealed class MainViewController : UIViewController
             BorderStyle = UITextBorderStyle.RoundedRect,
             KeyboardType = UIKeyboardType.NumbersAndPunctuation,
             AutocorrectionType = UITextAutocorrectionType.No,
+            TextAlignment = UITextAlignment.Left,
         };
+        _ipField.SemanticContentAttribute = UISemanticContentAttribute.ForceLeftToRight;
         hero.AddArrangedSubview(_ipField);
         var row = new UIStackView { Axis = UILayoutConstraintAxis.Horizontal, Spacing = 8 };
         row.AddArrangedSubview(MkBtn("Test", async () => await TestAsync()));
