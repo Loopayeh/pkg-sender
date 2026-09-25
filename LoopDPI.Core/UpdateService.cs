@@ -187,14 +187,17 @@ public static class UpdateService
             if (string.IsNullOrEmpty(exe) || Flavor() != LinuxFlavor.TarGz) return false;
             string tmp = Path.Combine(Path.GetTempPath(), "pkgsender_upd_" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(tmp);
-            // tar keeps the stored exec bit, so no chmod pass needed.
+            // tar keeps the stored exec bit, so no chmod pass needed;
+            // only the named member is ever extracted.
             using (var proc = Process.Start(new ProcessStartInfo("tar",
-                $"-xzf \"{tarGzPath}\" -C \"{tmp}\" PkgSender") { UseShellExecute = false }))
+                $"-xzf \"{tarGzPath}\" --no-same-owner -C \"{tmp}\" PkgSender") { UseShellExecute = false }))
             {
                 if (proc == null || !proc.WaitForExit(120000) || proc.ExitCode != 0) return false;
             }
             string fresh = Path.Combine(tmp, "PkgSender");
-            if (!File.Exists(fresh)) return false;
+            var fi = new FileInfo(fresh);
+            // A symlinked or empty member must never replace the binary.
+            if (!fi.Exists || fi.LinkTarget != null || fi.Length <= 0) return false;
             string old = exe + ".old";
             try { File.Delete(old); } catch { }
             File.Move(exe, old);

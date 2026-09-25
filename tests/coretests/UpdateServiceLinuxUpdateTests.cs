@@ -78,6 +78,23 @@ public class UpdateServiceLinuxUpdateTests : IDisposable
         Assert.False(UpdateService.RunTarGzUpdateAndExit(tar));
     }
 
+    [Fact]
+    public void RunTarGzUpdateAndExit_RejectsSymlinkedPayload()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        // A malicious tarball could carry "PkgSender" as a symlink pointing
+        // outside the extract dir. The updater must reject it before the swap.
+        string target = Path.Combine(_dir, "evil.sh");
+        File.WriteAllText(target, "#!/bin/sh\n");
+        string link = Path.Combine(_dir, "PkgSender");
+        File.CreateSymbolicLink(link, target);
+        string tar = Path.Combine(_dir, "symlink.tar.gz");
+        RunTar($"-czf \"{tar}\" -C \"{_dir}\" PkgSender");
+        Assert.False(UpdateService.RunTarGzUpdateAndExit(tar));
+        // The running binary must be untouched (no .old swap happened).
+        Assert.False(File.Exists((Environment.ProcessPath ?? "") + ".old"));
+    }
+
     /// <summary>
     /// The contract between Build-Release.sh and the updater: the tarball
     /// carries "PkgSender" at its root with the exec bit stored, so the
