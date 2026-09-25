@@ -91,6 +91,39 @@ notify_user(const char *msg)
 	sceKernelSendNotificationRequest(0, &req, sizeof(req), 0);
 }
 
+/* -- Console LAN IP --------------------------------------------------
+ * The listener binds INADDR_ANY so it never learns its own address.
+ * Trick: connect() a UDP socket at 8.8.8.8:53 (sends nothing), then
+ * getsockname() reveals the local interface address used for LAN. */
+static char g_lan_ip[64] = "";
+
+static void
+resolve_lan_ip(void)
+{
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	struct sockaddr_in dst, local;
+	socklen_t llen;
+
+	if (fd < 0)
+		return;
+	memset(&dst, 0, sizeof(dst));
+	dst.sin_family = AF_INET;
+	dst.sin_port = htons(53);
+	dst.sin_addr.s_addr = htonl(0x08080808); /* 8.8.8.8, no packet sent */
+	if (connect(fd, (struct sockaddr *)&dst, sizeof(dst)) != 0) {
+		close(fd);
+		return;
+	}
+	llen = sizeof(local);
+	memset(&local, 0, sizeof(local));
+	if (getsockname(fd, (struct sockaddr *)&local, &llen) == 0 &&
+	    local.sin_family == AF_INET &&
+	    local.sin_addr.s_addr != htonl(INADDR_LOOPBACK) &&
+	    local.sin_addr.s_addr != htonl(INADDR_ANY))
+		inet_ntop(AF_INET, &local.sin_addr, g_lan_ip, sizeof(g_lan_ip));
+	close(fd);
+}
+
 /* ── SCE AppInstUtil ABI (same layout websrv/ftpsrv use) ─────────────── */
 typedef struct pkg_metadata {
 	const char *uri;
@@ -2559,6 +2592,7 @@ beacon_worker(void *arg)
 	int fd = socket(AF_INET, SOCK_DGRAM, 0);
 	struct sockaddr_in bc;
 	int one = 1;
+	char msg[96];
 
 	if (fd < 0)
 		return NULL;
@@ -2567,8 +2601,12 @@ beacon_worker(void *arg)
 	bc.sin_family = AF_INET;
 	bc.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 	bc.sin_port = htons(BEACON_PORT);
+	if (g_lan_ip[0])
+		snprintf(msg, sizeof(msg), "%s %s", BEACON_MSG, g_lan_ip);
+	else
+		snprintf(msg, sizeof(msg), "%s", BEACON_MSG);
 	for (;;) {
-		sendto(fd, BEACON_MSG, strlen(BEACON_MSG), 0,
+		sendto(fd, msg, strlen(msg), 0,
 		    (struct sockaddr *)&bc, sizeof(bc));
 		sleep(3);
 	}
@@ -2726,13 +2764,26 @@ main(void)
 		return 1;
 	}
 
-	notify_user(
+	resolve_lan_ip();
+	{
+		char hello[128];
 #ifdef TEST_ONLY
-	    "Loopayeh: TEST BUILD listening (no installs)"
+		if (g_lan_ip[0])
+			snprintf(hello, sizeof(hello),
+			    "Loopayeh: TEST %s:12800 (no installs)", g_lan_ip);
+		else
+			snprintf(hello, sizeof(hello),
+			    "Loopayeh: TEST BUILD listening (no installs)");
 #else
-	    "Loopayeh: listening on port 12800"
+		if (g_lan_ip[0])
+			snprintf(hello, sizeof(hello),
+			    "Loopayeh: %s:12800 listening", g_lan_ip);
+		else
+			snprintf(hello, sizeof(hello),
+			    "Loopayeh: listening on port 12800");
 #endif
-	    );
+		notify_user(hello);
+	}
 
 	beacon_start();
 	pc_listen_start();
