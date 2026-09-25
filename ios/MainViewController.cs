@@ -51,7 +51,13 @@ public sealed class MainViewController : UIViewController
         Title = "PKG Sender";
         View!.BackgroundColor = UIColor.SystemBackground;
 
-        var scroll = new UIScrollView { TranslatesAutoresizingMaskIntoConstraints = false };
+        var scroll = new UIScrollView
+        {
+            TranslatesAutoresizingMaskIntoConstraints = false,
+            DirectionalLockEnabled = true,
+            AlwaysBounceHorizontal = false,
+            ShowsHorizontalScrollIndicator = false,
+        };
         var stack = new UIStackView
         {
             Axis = UILayoutConstraintAxis.Vertical,
@@ -66,19 +72,19 @@ public sealed class MainViewController : UIViewController
         NSLayoutConstraint.ActivateConstraints(new[]
         {
             scroll.TopAnchor.ConstraintEqualTo(View.SafeAreaLayoutGuide.TopAnchor),
-            scroll.LeadingAnchor.ConstraintEqualTo(View.LeadingAnchor),
-            scroll.TrailingAnchor.ConstraintEqualTo(View.TrailingAnchor),
+            scroll.LeadingAnchor.ConstraintEqualTo(View.SafeAreaLayoutGuide.LeadingAnchor),
+            scroll.TrailingAnchor.ConstraintEqualTo(View.SafeAreaLayoutGuide.TrailingAnchor),
             scroll.BottomAnchor.ConstraintEqualTo(View.SafeAreaLayoutGuide.BottomAnchor),
-            stack.TopAnchor.ConstraintEqualTo(scroll.TopAnchor, 12),
-            stack.LeadingAnchor.ConstraintEqualTo(scroll.LeadingAnchor, 16),
-            stack.TrailingAnchor.ConstraintEqualTo(scroll.TrailingAnchor, -16),
-            stack.BottomAnchor.ConstraintEqualTo(scroll.BottomAnchor, -12),
-            stack.WidthAnchor.ConstraintEqualTo(scroll.WidthAnchor, -32),
+            stack.TopAnchor.ConstraintEqualTo(scroll.ContentLayoutGuide.TopAnchor, 12),
+            stack.LeadingAnchor.ConstraintEqualTo(scroll.ContentLayoutGuide.LeadingAnchor, 16),
+            stack.TrailingAnchor.ConstraintEqualTo(scroll.ContentLayoutGuide.TrailingAnchor, -16),
+            stack.BottomAnchor.ConstraintEqualTo(scroll.ContentLayoutGuide.BottomAnchor, -12),
+            stack.WidthAnchor.ConstraintEqualTo(scroll.FrameLayoutGuide.WidthAnchor, -32),
         });
 
         // hero: title + IP + Test + Detect
         var hero = Card();
-        hero.AddArrangedSubview(MkLabel("PKG Sender", 22, true));
+        hero.AddArrangedSubview(MkLabel("PKG Sender  •  v1.0.3", 22, true));
         hero.AddArrangedSubview(MkLabel("PS4 / PS5 packages over LAN", 14, false, UIColor.SecondaryLabel));
         _ipField = new UITextField
         {

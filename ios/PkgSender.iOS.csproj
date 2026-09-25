@@ -6,8 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <ApplicationId>com.loopayeh.pkgsender</ApplicationId>
-    <ApplicationVersion>1</ApplicationVersion>
-    <ApplicationDisplayVersion>1.0.2</ApplicationDisplayVersion>
+    <ApplicationVersion>2</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0.3</ApplicationDisplayVersion>
     <SupportedOSPlatformVersion>16.0</SupportedOSPlatformVersion>
     <CodesignKey>Apple Development</CodesignKey>
     <!-- Bundle signing happens on a Mac with Xcode; Windows builds unsigned for TestFlight upload via Transporter -->

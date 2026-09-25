@@ -31,7 +31,7 @@ jobs:
 
       - name: Rename IPA
         run: |
-          VER=$(grep -oPm1 '(?<=<ApplicationDisplayVersion>)[^<]+' ios/PkgSender.iOS.csproj || echo 1.0.1)
+          VER=$(sed -n 's/.*<ApplicationDisplayVersion>\([^<]*\)<.*/\1/p' ios/PkgSender.iOS.csproj | head -1); VER=${VER:-1.0.3}
           cp ios/bin/Release/net8.0-ios/ios-arm64/publish/*.ipa "PkgSender-${VER}-ios-unsigned.ipa"
           ls -la *.ipa
 
