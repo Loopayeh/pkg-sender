@@ -39,7 +39,9 @@ public partial class UpdateDialog : Window
         prog.Text = $"Downloading {asset.Name}…";
         string tmp = Path.Combine(Path.GetTempPath(), "pkgsender_update_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tmp);
-        string dest = Path.Combine(tmp, asset.Name);
+        // Asset names come from the releases API (PKGSENDER_UPDATE_API can
+        // point anywhere) — never let one escape the temp dir.
+        string dest = Path.Combine(tmp, Path.GetFileName(asset.Name));
         try
         {
             await UpdateService.DownloadAsync(asset.Url, dest, (got, total) =>
