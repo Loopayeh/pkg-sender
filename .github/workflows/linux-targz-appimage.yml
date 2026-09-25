@@ -1,0 +1,60 @@
+name: Linux tar.gz + AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'library/**'
+      - 'LoopDPI.Core/**'
+      - 'payload/pkg-receiver.elf'
+      - 'packaging/**'
+      - '.github/workflows/linux-targz-appimage.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish linux-x64 (self-contained, single file)
+        run: >
+          dotnet publish library/PkgSender.csproj -c Release -r linux-x64
+          --self-contained true /p:PublishSingleFile=true
+          /p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish --nologo -v q
+
+      - name: Stage portable tar.gz
+        run: |
+          VER=$(sed -n 's/.*<Version>\([^<]*\)<.*/\1/p' library/PkgSender.csproj | head -1); VER=${VER:-1.2.8}
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          chmod +x publish/PkgSender
+          cp library/pkg_header.py publish/
+          tar -czf "PkgSender-${VER}-linux-x64.tar.gz" -C publish PkgSender pkg-receiver.elf pkg_header.py \
+              -C packaging README-linux.txt
+
+      - name: Build AppImage
+        run: |
+          VER=${VER:-1.2.8}
+          mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/1024x1024/apps
+          cp publish/PkgSender publish/pkg-receiver.elf publish/pkg_header.py AppDir/usr/bin/
+          ln -s usr/bin/PkgSender AppDir/AppRun
+          cp packaging/pkg-sender.desktop AppDir/
+          cp library/Assets/logo.png AppDir/usr/share/icons/hicolor/1024x1024/apps/pkg-sender.png
+          cp library/Assets/logo.png AppDir/pkg-sender.png
+          curl -sSL -o appimagetool.AppImage \
+              https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool.AppImage
+          ./appimagetool.AppImage --appimage-extract-and-run AppDir "PkgSender-${VER}-linux-x64.AppImage"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-targz-appimage
+          path: |
+            PkgSender-*-linux-x64.tar.gz
+            PkgSender-*-linux-x64.AppImage

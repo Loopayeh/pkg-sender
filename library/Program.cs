@@ -18,6 +18,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        LoopDPI.Core.UpdateService.CleanupOldBinary();
         foreach (var a in args)
             if (a.Equals("--first-install", StringComparison.OrdinalIgnoreCase))
                 ForceAbout = true;

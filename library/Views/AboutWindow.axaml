@@ -3,7 +3,7 @@
         x:Class="PkgSender.Views.AboutWindow"
         Title="About PKG Sender" Width="380" Height="540"
         CanResize="False" ShowInTaskbar="False"
-        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
+        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI, Inter"
         WindowStartupLocation="CenterOwner">
   <Window.Styles>
     <Style Selector="Button.ghost">

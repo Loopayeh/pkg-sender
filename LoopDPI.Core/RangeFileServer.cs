@@ -456,8 +456,20 @@ public sealed class RangeFileServer : IDisposable
         }
     }
 
-    private static string JsonEscape(string s) =>
-        s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ");
+    private static string JsonEscape(string s)
+    {
+        // Full escaping incl. control chars: titles come from pkg SFO data
+        // and must not be able to break the /catalog JSON.
+        var sb = new StringBuilder(s.Length + 8);
+        foreach (char c in s)
+        {
+            if (c == '\\') sb.Append("\\\\");
+            else if (c == '"') sb.Append("\\\"");
+            else if (c < 0x20) sb.Append("\\u").Append(((int)c).ToString("x4"));
+            else sb.Append(c);
+        }
+        return sb.ToString();
+    }
 
     private static async Task WriteRaw(NetworkStream ns, string s, CancellationToken ct)
     {

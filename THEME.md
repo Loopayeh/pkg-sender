@@ -28,6 +28,10 @@ red `#E17B7B`, purple `#9B6DDB`, light blue `#91C8F6`, gray `#6B7280`.
 
 ## Typography (Segoe UI everywhere)
 
+Avalonia windows use `Segoe UI, Inter` — Segoe UI on Windows, the bundled
+Inter font on Linux/Android where Segoe UI is absent. Monospace blocks use
+`Consolas, monospace`.
+
 | Role    | Viewer (tkinter)      | Avalonia              |
 |---------|-----------------------|-----------------------|
 | Title   | 18 bold (FONT_BIG)    | 18 bold               |

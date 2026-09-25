@@ -11,13 +11,27 @@ namespace LoopDPI.Core;
 
 /// <summary>
 /// Self-update helper, mirroring pkg-viewer/updater.py.
-/// Installed builds only: checks GitHub releases, downloads the Setup
+/// Windows installed builds: checks GitHub releases, downloads the Setup
 /// installer, runs it silent and exits so Setup can overwrite the exe.
+/// Linux tar.gz builds: downloads the tar.gz and swaps the binary in place.
 /// </summary>
 public static class UpdateService
 {
     public const string AppVersion = "v1.2.8";
     public const string UpdateRepo = "Loopayeh/pkg-sender";
+
+    /// <summary>How this build is packaged; only TarGz self-updates on Linux.</summary>
+    public enum LinuxFlavor { None, TarGz, Deb, AppImage }
+
+    public static LinuxFlavor Flavor()
+    {
+        if (!OperatingSystem.IsLinux()) return LinuxFlavor.None;
+        string p = Environment.ProcessPath ?? "";
+        if (p.EndsWith(".AppImage", StringComparison.OrdinalIgnoreCase)) return LinuxFlavor.AppImage;
+        // Official .deb layout: /usr/lib/pkgsender/pkgsender (CI linux-deb.yml).
+        if (p.StartsWith("/usr/lib/pkgsender/", StringComparison.OrdinalIgnoreCase)) return LinuxFlavor.Deb;
+        return LinuxFlavor.TarGz;
+    }
 
     public sealed record Asset(string Name, string Url, long Size);
     public sealed record Release(string Tag, string Name, string Body, List<Asset> Assets);
@@ -90,6 +104,17 @@ public static class UpdateService
     public static Asset? PickSetupAsset(Release? info)
     {
         var assets = info?.Assets ?? new();
+        if (OperatingSystem.IsLinux())
+        {
+            // PkgSender-<ver>-linux-x64.tar.gz (same naming scheme as the APK).
+            foreach (var a in assets)
+            {
+                string n = (a.Name ?? "").ToLowerInvariant();
+                if (n.Contains("linux") && n.EndsWith(".tar.gz") && !string.IsNullOrEmpty(a.Url))
+                    return a;
+            }
+            return null;
+        }
         foreach (var a in assets)
         {
             string n = (a.Name ?? "").ToLowerInvariant();
@@ -145,5 +170,54 @@ public static class UpdateService
             return true;
         }
         catch { return false; }
+    }
+
+    /// <summary>
+    /// Linux tar.gz self-update: extract the new PkgSender binary from the
+    /// downloaded tar.gz next to the current one (old binary kept as
+    /// PkgSender.old, removed on next start), relaunch and return true.
+    /// Caller must exit immediately.
+    /// </summary>
+    public static bool RunTarGzUpdateAndExit(string tarGzPath)
+    {
+        try
+        {
+            string exe = Environment.ProcessPath ?? "";
+            string dir = Path.GetDirectoryName(exe) ?? "";
+            if (string.IsNullOrEmpty(exe) || Flavor() != LinuxFlavor.TarGz) return false;
+            string tmp = Path.Combine(Path.GetTempPath(), "pkgsender_upd_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tmp);
+            // tar keeps the stored exec bit, so no chmod pass needed;
+            // only the named member is ever extracted.
+            using (var proc = Process.Start(new ProcessStartInfo("tar",
+                $"-xzf \"{tarGzPath}\" --no-same-owner -C \"{tmp}\" PkgSender") { UseShellExecute = false }))
+            {
+                if (proc == null || !proc.WaitForExit(120000) || proc.ExitCode != 0) return false;
+            }
+            string fresh = Path.Combine(tmp, "PkgSender");
+            var fi = new FileInfo(fresh);
+            // A symlinked or empty member must never replace the binary.
+            if (!fi.Exists || fi.LinkTarget != null || fi.Length <= 0) return false;
+            string old = exe + ".old";
+            try { File.Delete(old); } catch { }
+            File.Move(exe, old);
+            File.Move(fresh, exe);
+            try { Directory.Delete(tmp, true); } catch { }
+            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = dir });
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Remove the binary left behind by a previous tar.gz self-update.</summary>
+    public static void CleanupOldBinary()
+    {
+        try
+        {
+            if (!OperatingSystem.IsLinux()) return;
+            string old = (Environment.ProcessPath ?? "") + ".old";
+            if (File.Exists(old)) File.Delete(old);
+        }
+        catch { }
     }
 }
