@@ -47,7 +47,7 @@ public partial class DrivePickerWindow : Window
         }
         foreach (var d in drives)
         {
-            string root = d.Name; // e.g. "E:\"
+            string root = d.Name; // "E:\" on Windows, mount point on Linux
             bool ready = false;
             string label = root, detail = "not ready";
             try

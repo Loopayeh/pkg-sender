@@ -1,0 +1,24 @@
+name: Linux tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'library/**'
+      - 'LoopDPI.Core/**'
+      - 'tests/**'
+      - '.github/workflows/linux-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Run unit tests (updater, range server, packaging contract)
+        run: dotnet test tests/coretests/CoreTests.csproj --nologo -v q

@@ -3,7 +3,7 @@
         x:Class="PkgSender.Views.SwitchDialog"
         Title="Console found" Width="400" Height="250"
         CanResize="False" ShowInTaskbar="False"
-        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
+        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI, Inter"
         WindowStartupLocation="CenterOwner">
   <StackPanel Spacing="8" Margin="24,20">
     <TextBlock Text="A console is reachable at a different address." FontSize="14" FontWeight="Bold" TextWrapping="Wrap"/>

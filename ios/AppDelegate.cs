@@ -13,9 +13,10 @@ public sealed class AppDelegate : UIApplicationDelegate
     {
         // Technical tool with IP addresses + numeric fields: force LTR so RTL
         // system locales (e.g. Persian) don't mirror/shift the scroll content.
+        // (Direct views only — SemanticContentAttribute doesn't compile on the
+        // UIView appearance proxy.)
         Window = new UIWindow(UIScreen.MainScreen.Bounds);
         Window.SemanticContentAttribute = UISemanticContentAttribute.ForceLeftToRight;
-        UIView.Appearance.SemanticContentAttribute = UISemanticContentAttribute.ForceLeftToRight;
         _main = new MainViewController();
         var nav = new UINavigationController(_main);
         nav.View.SemanticContentAttribute = UISemanticContentAttribute.ForceLeftToRight;

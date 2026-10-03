@@ -3,7 +3,7 @@
         x:Class="PkgSender.Views.CopyChoiceDialog"
         Title="File exists on console" Width="440" Height="270"
         CanResize="False" ShowInTaskbar="False"
-        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI"
+        Background="#202020" Foreground="#F1F3F8" FontFamily="Segoe UI, Inter"
         WindowStartupLocation="CenterOwner">
   <StackPanel Spacing="8" Margin="24,20">
     <TextBlock Text="This file is already on the console (partial)." FontSize="14" FontWeight="Bold" TextWrapping="Wrap"/>

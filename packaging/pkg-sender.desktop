@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PKG Sender
+GenericName=PKG Sender
+Comment=Install PS4/PS5 .pkg files over LAN
+Exec=PkgSender
+Icon=pkg-sender
+Terminal=false
+Categories=Game;Network;Utility;
+Keywords=ps4;ps5;pkg;playstation;
