@@ -189,8 +189,14 @@ public static class UpdateService
             Directory.CreateDirectory(tmp);
             // tar keeps the stored exec bit, so no chmod pass needed;
             // only the named member is ever extracted.
-            using (var proc = Process.Start(new ProcessStartInfo("tar",
-                $"-xzf \"{tarGzPath}\" --no-same-owner -C \"{tmp}\" PkgSender") { UseShellExecute = false }))
+            var psi = new ProcessStartInfo("tar") { UseShellExecute = false };
+            psi.ArgumentList.Add("-xzf");
+            psi.ArgumentList.Add(tarGzPath);
+            psi.ArgumentList.Add("--no-same-owner");
+            psi.ArgumentList.Add("-C");
+            psi.ArgumentList.Add(tmp);
+            psi.ArgumentList.Add("PkgSender");
+            using (var proc = Process.Start(psi))
             {
                 if (proc == null || !proc.WaitForExit(120000) || proc.ExitCode != 0) return false;
             }
