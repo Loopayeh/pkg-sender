@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
 using Android.App;
 using Android.Content;
@@ -105,6 +106,11 @@ public sealed class MainActivity : Activity
     MaterialButton? _tabPkgs;
     MaterialButton? _tabPld;
     TextInputEditText? _pldPort;
+    TextInputEditText? _pldIp;
+    TextInputEditText? _ldrPort;
+    MaterialButton? _scanBtn;
+    MaterialButton? _sendElfBtn;
+    bool _elfBusy;
     WebView? _pldWeb;
     TextView? _pldStatus;
     bool _pldLoaded;
@@ -231,6 +237,25 @@ public sealed class MainActivity : Activity
             ViewGroup.LayoutParams.MatchParent, 0, 1f);
         _payloadPage.SetPadding(pad, Dp(4), pad, 0);
         _payloadPage.Visibility = ViewStates.Gone;
+        // console IP row (synced with Packages tab) + subnet scan for the payload port
+        var pldIpRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        pldIpRow.SetGravity(GravityFlags.CenterVertical);
+        var pldIpWrap = new TextInputLayout(this, null, MatAttr("textInputOutlinedStyle"));
+        pldIpWrap.Hint = "Console IP";
+        pldIpWrap.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        _pldIp = new TextInputEditText(pldIpWrap.Context);
+        _pldIp.InputType = Android.Text.InputTypes.ClassText
+            | Android.Text.InputTypes.TextVariationVisiblePassword;
+        pldIpWrap.AddView(_pldIp);
+        pldIpRow.AddView(pldIpWrap);
+        _scanBtn = TonalBtn("⌕ Scan", () => _ = ScanPayloadPortAsync());
+        var scnp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+        scnp.LeftMargin = Dp(8);
+        scnp.Gravity = GravityFlags.CenterVertical;
+        _scanBtn.LayoutParameters = scnp;
+        pldIpRow.AddView(_scanBtn);
+        _payloadPage.AddView(pldIpRow);
+        _pldIp.TextChanged += (_, _) => SyncIpFromPayloadTab();
         var pldRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         pldRow.SetGravity(GravityFlags.CenterVertical);
         var portWrap = new TextInputLayout(this, null, MatAttr("textInputOutlinedStyle"));
@@ -255,6 +280,28 @@ public sealed class MainActivity : Activity
         reloadBtn.LayoutParameters = rbp;
         pldRow.AddView(reloadBtn);
         _payloadPage.AddView(pldRow);
+        // receiver ELF row: loader port + direct inject (works even if PLDMGR loaded first)
+        var ldrRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        ldrRow.SetGravity(GravityFlags.CenterVertical);
+        var ldrp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        ldrp.TopMargin = Dp(8);
+        ldrRow.LayoutParameters = ldrp;
+        var ldrWrap = new TextInputLayout(this, null, MatAttr("textInputOutlinedStyle"));
+        ldrWrap.Hint = "ELF port (elfldr: 9020)";
+        ldrWrap.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        _ldrPort = new TextInputEditText(ldrWrap.Context);
+        _ldrPort.InputType = Android.Text.InputTypes.ClassNumber;
+        string? savedLdr = GetPreferences(FileCreationMode.Private).GetString("elfport", null);
+        _ldrPort.Text = string.IsNullOrEmpty(savedLdr) ? "9020" : savedLdr;
+        ldrWrap.AddView(_ldrPort);
+        ldrRow.AddView(ldrWrap);
+        _sendElfBtn = TonalBtn("Send our ELF", () => _ = SendReceiverElfAsync());
+        var seb = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+        seb.LeftMargin = Dp(8);
+        seb.Gravity = GravityFlags.CenterVertical;
+        _sendElfBtn.LayoutParameters = seb;
+        ldrRow.AddView(_sendElfBtn);
+        _payloadPage.AddView(ldrRow);
         _pldStatus = new TextView(this) { Text = "" };
         _pldStatus.TextSize = 12;
         _pldStatus.SetTextColor(_subColor);
@@ -507,7 +554,18 @@ public sealed class MainActivity : Activity
             if (_senderPage != null) _senderPage.Visibility = payload ? ViewStates.Gone : ViewStates.Visible;
             if (_payloadPage != null) _payloadPage.Visibility = payload ? ViewStates.Visible : ViewStates.Gone;
             PaintTabs(payload);
-            if (payload && !_pldLoaded) OpenPayloadUrl();
+            if (payload)
+            {
+                try
+                {
+                    string main = (_psIp?.Text ?? "").Trim();
+                    if (!string.IsNullOrEmpty(main) && _pldIp != null
+                        && string.IsNullOrEmpty((_pldIp.Text ?? "").Trim()))
+                        _pldIp.Text = main;
+                }
+                catch { }
+                if (!_pldLoaded) OpenPayloadUrl();
+            }
         }
         catch { }
     }
@@ -533,6 +591,184 @@ public sealed class MainActivity : Activity
         catch (Exception ex)
         {
             if (_pldStatus != null) _pldStatus.Text = "open failed: " + ex.Message;
+        }
+    }
+
+    void PldSay(string s) => RunOnUiThread(() =>
+    {
+        try { if (_pldStatus != null) _pldStatus.Text = s; } catch { }
+    });
+
+    void SyncIpFromPayloadTab()
+    {
+        try
+        {
+            string ip = (_pldIp?.Text ?? "").Trim();
+            if (_psIp != null && (_psIp.Text ?? "") != ip) _psIp.Text = ip;
+            GetPreferences(FileCreationMode.Private).Edit().PutString("psip", ip).Apply();
+        }
+        catch { }
+    }
+
+    void SetPayloadIp(string ip)
+    {
+        try
+        {
+            RunOnUiThread(() =>
+            {
+                if (_pldIp != null) _pldIp.Text = ip;
+                if (_psIp != null) _psIp.Text = ip;
+            });
+            GetPreferences(FileCreationMode.Private).Edit().PutString("psip", ip).Apply();
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Scans the phone's /24 for a host with the payload web port open
+    /// (PLDMGR 8084 by default) — finds the console even when our
+    /// receiver ELF isn't running (so no beacon to listen for).
+    /// </summary>
+    async Task ScanPayloadPortAsync()
+    {
+        var btn = _scanBtn;
+        if (btn != null) RunOnUiThread(() => btn.Enabled = false);
+        try
+        {
+            string portTxt = (_pldPort?.Text ?? "").Trim();
+            if (!int.TryParse(portTxt, out int port) || port <= 0 || port > 65535) port = 8084;
+            string? prefix = SubnetPrefix();
+            if (string.IsNullOrEmpty(prefix))
+            {
+                PldSay("no network — type the IP manually");
+                return;
+            }
+            PldSay($"scanning {prefix}0/24 for :{port}…");
+            string? hit = await Task.Run(() => ScanSubnetForPort(port, prefix));
+            if (string.IsNullOrEmpty(hit))
+            {
+                PldSay($"nothing on :{port} — PLDMGR running? same network?");
+                return;
+            }
+            SetPayloadIp(hit);
+            _pldLoaded = false;
+            OpenPayloadUrl();
+            PldSay($"found console at {hit}:{port}");
+        }
+        finally { if (btn != null) RunOnUiThread(() => btn.Enabled = true); }
+    }
+
+    string SubnetPrefix()
+    {
+        try
+        {
+            var wifi = (Android.Net.Wifi.WifiManager?)GetSystemService(WifiService);
+            int raw = wifi?.ConnectionInfo?.IpAddress ?? 0;
+            if (raw != 0)
+            {
+                string wifiIp = $"{raw & 0xff}.{(raw >> 8) & 0xff}.{(raw >> 16) & 0xff}.{(raw >> 24) & 0xff}";
+                var b = System.Net.IPAddress.Parse(wifiIp).GetAddressBytes();
+                return $"{b[0]}.{b[1]}.{b[2]}.";
+            }
+        }
+        catch { }
+        try
+        {
+            string typed = (_pldIp?.Text ?? "").Trim();
+            if (string.IsNullOrEmpty(typed) || typed.EndsWith(".")) typed = (_psIp?.Text ?? "").Trim();
+            var b = System.Net.IPAddress.Parse(typed).GetAddressBytes();
+            if (b.Length == 4) return $"{b[0]}.{b[1]}.{b[2]}.";
+        }
+        catch { }
+        return "";
+    }
+
+    static string? ScanSubnetForPort(int port, string prefix)
+    {
+        try
+        {
+            string? found = null;
+            var sem = new SemaphoreSlim(28);
+            var tasks = new System.Collections.Generic.List<Task>();
+            for (int i = 1; i < 255; i++)
+            {
+                string ip = prefix + i;
+                tasks.Add(Task.Run(async () =>
+                {
+                    await sem.WaitAsync();
+                    try
+                    {
+                        if (found != null) return;
+                        using var cli = new TcpClient();
+                        using var cts = new CancellationTokenSource(600);
+                        try
+                        {
+                            await cli.ConnectAsync(ip, port, cts.Token);
+                            if (cli.Connected) found = ip;
+                        }
+                        catch { }
+                    }
+                    finally { sem.Release(); }
+                }));
+            }
+            Task.WaitAll(tasks.ToArray(), TimeSpan.FromSeconds(25));
+            return found;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Streams the bundled pkg-receiver.elf straight to the console
+    /// listener (netcat style, default elfldr 9020). Works right after
+    /// the jailbreak even if PLDMGR was loaded first — the receiver
+    /// kills any previous instance of itself on startup.
+    /// </summary>
+    async Task SendReceiverElfAsync()
+    {
+        if (_elfBusy) return;
+        string ip = (_pldIp?.Text ?? "").Trim();
+        if (string.IsNullOrEmpty(ip) || ip.EndsWith("."))
+        {
+            // fall back to the Packages tab field
+            ip = (_psIp?.Text ?? "").Trim();
+            if (!string.IsNullOrEmpty(ip)) SetPayloadIp(ip);
+        }
+        if (string.IsNullOrEmpty(ip) || ip.EndsWith(".")) { PldSay("set the console IP first (or ⌕ Scan)"); return; }
+        string portTxt = (_ldrPort?.Text ?? "").Trim();
+        if (!int.TryParse(portTxt, out int port) || port <= 0 || port > 65535) { PldSay("bad ELF port"); return; }
+        try { GetPreferences(FileCreationMode.Private).Edit().PutString("elfport", port.ToString()).Apply(); } catch { }
+        var btn = _sendElfBtn;
+        _elfBusy = true;
+        if (btn != null) RunOnUiThread(() => btn.Enabled = false);
+        try
+        {
+            PldSay($"sending receiver to {ip}:{port}…");
+            long sent = await Task.Run(async () =>
+            {
+                using var emb = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.pkg-receiver.elf")
+                    ?? throw new IOException("bundled ELF missing");
+                using var cli = new TcpClient();
+                using var cts = new CancellationTokenSource(10000);
+                await cli.ConnectAsync(ip, port, cts.Token);
+                using var net = cli.GetStream();
+                var buf = new byte[65536];
+                long total = 0;
+                int r;
+                while ((r = await emb.ReadAsync(buf, 0, buf.Length)) > 0)
+                {
+                    await net.WriteAsync(buf, 0, r);
+                    total += r;
+                }
+                await net.FlushAsync();
+                return total;
+            });
+            PldSay($"sent {sent / 1024} KB receiver to {ip}:{port} — now Open the dashboard");
+        }
+        catch (Exception ex) { PldSay("send failed: " + Short(ex.Message)); }
+        finally
+        {
+            _elfBusy = false;
+            if (btn != null) RunOnUiThread(() => btn.Enabled = true);
         }
     }
 
@@ -729,7 +965,7 @@ public sealed class MainActivity : Activity
                 + "3) On PS5, run the exploit first, then load pkg-receiver.elf (it's bundled here — copy it from the pkg-receiver.elf card). On PS4, open Remote Package Installer and keep it in focus (minimize only after \"waiting to install\" is done). With GoldHEN: Settings → GoldHEN → Server Settings → enable the servers, then Test will find the console.\n\n"
                 + "4) Type the console IP above and tap Test. Green = connected.\n\n"
                 + "5) Tap + Add PKG / Image, tick the games, then Send queue. PKGs install on the console; disc images are copied to /data/homebrew. Keep the phone awake and don't leave the app mid-transfer.\n\n"
-                + "6) Payloads tab: opens the Payload Manager (PLDMGR) web dashboard running on your console — same console IP, port 8084 by default. If you use another tool, just change the port (e.g. 9200) and tap Open.\n\n"
+                + "6) Payloads tab: opens the Payload Manager (PLDMGR) web dashboard running on your console — same console IP, port 8084 by default. If you use another tool, just change the port (e.g. 9200) and tap Open. No IP? Tap ⌕ Scan to find the console on your network. If our receiver isn't running yet, tap Send our ELF (needs the jailbreak + loader active, default port 9020) — load order doesn't matter, it works even if PLDMGR was loaded first.\n\n"
                 + "Tip: if Test can't reach the console, check the IP, and make sure the modem lets Wi-Fi devices talk to each other (a modem setting called AP/Client Isolation must be OFF).\n\n"
                 + "————————————————\n\n"
                 + "بهترین حالت (پیشنهادی)\n"
@@ -738,7 +974,7 @@ public sealed class MainActivity : Activity
                 + "۳) روی PS5 اول اکسپلویت را اجرا کن و pkg-receiver.elf را بفرست بالا (فایلش همین‌جا توی برنامه هست — از کارت pkg-receiver.elf کپی بگیر). روی PS4 برنامه Remote Package Installer را باز کن و بذار جلو بمونه (بعد از شروع نصب می‌تونی مینیمایزش کنی). با گلدHEN: برو توی Settings ← GoldHEN ← Server Settings و سرورها (Payload/BinLoader Server) را روشن کن، بعد Test کنسول را پیدا می‌کنه.\n\n"
                 + "۴) آی‌پی کنسول را بالا وارد کن و Test را بزن. سبز شد یعنی وصله.\n\n"
                 + "۵) با + Add PKG / Image بازی اضافه کن (PKG یا ایمیج دیسک — ایمیج‌ها توی /data/homebrew کپی می‌شن)، تیک بزن و Send queue را بزن. وسط انتقال گوشی را خاموش نکن و از برنامه بیرون نرو.\n\n"
-                + "۶) تب Payloads: داشبورد وب Payload Manager (PLDMGR) روی کنسولت را باز می‌کنه — با همان آی‌پی کنسول، پورت پیش‌فرض 8084. اگه ابزار دیگه‌ای استفاده می‌کنی، فقط پورت را عوض کن (مثلاً 9200) و Open را بزن.\n\n"
+                + "۶) تب Payloads: داشبورد وب Payload Manager (PLDMGR) روی کنسولت را باز می‌کنه — با همان آی‌پی کنسول، پورت پیش‌فرض 8084. اگه ابزار دیگه‌ای استفاده می‌کنی، فقط پورت را عوض کن (مثلاً 9200) و Open را بزن. آی‌پی نداری؟ ⌕ Scan را بزن تا کنسول توی شبکه پیدا بشه. اگه رسیور ما هنوز بالا نیست، Send our ELF را بزن (جیلبریک و لودر باید فعال باشن، پورت پیش‌فرض 9020) — ترتیب لود مهم نیست، حتی اگه PLDMGR زودتر بالا اومده باشه کار می‌کنه.\n\n"
                 + "نکته: اگه Test وصل نشد، آی‌پی را چک کن و مطمئن شو مودم اجازه می‌ده دستگاه‌های وای‌فای همدیگه رو ببینن (تو تنظیمات وای‌فای مودم گزینه‌ای به اسم AP/Client Isolation هست — باید خاموش باشه)."
         };
         b.SetTextColor(_subColor); b.TextSize = 14;
