@@ -360,7 +360,7 @@ public sealed class MainActivity : Activity
         rbp.Gravity = GravityFlags.CenterVertical;
         reloadBtn.LayoutParameters = rbp;
         pldRow.AddView(reloadBtn);
-        _uploadElfBtn = TonalBtn("⬆ Our ELF", () => _ = UploadReceiverViaPldmgrAsync());
+        _uploadElfBtn = TonalBtn("⬆ ELF", () => _ = UploadReceiverViaPldmgrAsync());
         var ueb = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1.4f);
         ueb.LeftMargin = Dp(8);
         ueb.Gravity = GravityFlags.CenterVertical;
@@ -720,7 +720,15 @@ public sealed class MainActivity : Activity
             try { GetPreferences(FileCreationMode.Private).Edit().PutString("pldport", port).Apply(); } catch { }
             if (string.IsNullOrEmpty(ip) || ip.EndsWith("."))
             {
-                if (_pldStatus != null) _pldStatus.Text = "set the console IP first (top of Packages tab)";
+                if (_pldStatus != null) _pldStatus.Text = "type the console IP above, or tap ⌕ Scan";
+                try
+                {
+                    _pldWeb?.LoadDataWithBaseURL(null,
+                        "<html><body style='background:#121212;color:#999;font-family:sans-serif;padding:48px 24px;text-align:center'>"
+                        + "Set the console IP above and tap Open,<br>or tap \u2315 Scan to find the console.</body></html>",
+                        "text/html", "utf-8", null);
+                }
+                catch { }
                 return;
             }
             string url = $"http://{ip}:{port}/";
@@ -1570,7 +1578,7 @@ public sealed class MainActivity : Activity
                 + "3) On PS5, run the exploit first, then load pkg-receiver.elf (it's bundled here — tap Send ELF on the pkg-receiver.elf card; PLDMGR must be running). On PS4, open Remote Package Installer and keep it in focus (minimize only after \"waiting to install\" is done). With GoldHEN: Settings → GoldHEN → Server Settings → enable the servers, then Test will find the console.\n\n"
                 + "4) Type the console IP above and tap Test. Green = connected.\n\n"
                 + "5) Tap + Add PKG / Image, tick the games, then Send queue. PKGs install on the console; disc images are copied to /data/homebrew. Keep the phone awake and don't leave the app mid-transfer.\n\n"
-                + "6) Web UI tab: opens the Payload Manager (PLDMGR) web dashboard running on your console — same console IP, port 8084 by default (change it for other tools, e.g. 9200). No IP? Tap ⌕ Scan. If our receiver isn't running yet, tap ⬆ Our ELF: it uploads pkg-receiver.elf to PLDMGR and launches it, no loader port needed. The dashboard's own Upload button works too — pick any ELF from the phone.\n\n"
+                + "6) Web UI tab: opens the Payload Manager (PLDMGR) web dashboard running on your console — same console IP, port 8084 by default (change it for other tools, e.g. 9200). No IP? Tap ⌕ Scan. If our receiver isn't running yet, tap ⬆ ELF: it uploads pkg-receiver.elf to PLDMGR and launches it, no loader port needed. The dashboard's own Upload button works too — pick any ELF from the phone.\n\n"
                 + "7) Payloads tab: cloud payload list (same source PLDMGR uses) downloaded with the phone's internet — perfect for an offline console. ⬇ Get saves a payload on the phone (sha-checked), ⬆ Send pushes it to the console through PLDMGR. ⬇ Get all grabs every missing/update.\n\n"
                 + "Tip: if Test can't reach the console, check the IP, and make sure the modem lets Wi-Fi devices talk to each other (a modem setting called AP/Client Isolation must be OFF).\n\n"
                 + "————————————————\n\n"
@@ -1580,7 +1588,7 @@ public sealed class MainActivity : Activity
                 + "۳) روی PS5 اول اکسپلویت را اجرا کن و pkg-receiver.elf را بفرست بالا (از کارت pkg-receiver.elf دکمه Send ELF را بزن — باید PLDMGR بالا باشه). روی PS4 برنامه Remote Package Installer را باز کن و بذار جلو بمونه (بعد از شروع نصب می‌تونی مینیمایزش کنی). با گلدHEN: برو توی Settings ← GoldHEN ← Server Settings و سرورها (Payload/BinLoader Server) را روشن کن، بعد Test کنسول را پیدا می‌کنه.\n\n"
                 + "۴) آی‌پی کنسول را بالا وارد کن و Test را بزن. سبز شد یعنی وصله.\n\n"
                 + "۵) با + Add PKG / Image بازی اضافه کن (PKG یا ایمیج دیسک — ایمیج‌ها توی /data/homebrew کپی می‌شن)، تیک بزن و Send queue را بزن. وسط انتقال گوشی را خاموش نکن و از برنامه بیرون نرو.\n\n"
-                + "۶) تب Web UI: داشبورد وب Payload Manager (PLDMGR) روی کنسولت را باز می‌کنه — با همان آی‌پی کنسول، پورت پیش‌فرض 8084 (برای ابزار دیگه عوضش کن، مثلاً 9200). آی‌پی نداری؟ ⌕ Scan را بزن. اگه رسیور ما هنوز بالا نیست، ⬆ Our ELF را بزن: خودش pkg-receiver.elf را به PLDMGR آپلود و اجرا می‌کنه، بدون نیاز به پورت لودر. دکمه Upload خود داشبورد هم کار می‌کنه — هر ELFای از گوشی انتخاب کن.\n\n"
+                + "۶) تب Web UI: داشبورد وب Payload Manager (PLDMGR) روی کنسولت را باز می‌کنه — با همان آی‌پی کنسول، پورت پیش‌فرض 8084 (برای ابزار دیگه عوضش کن، مثلاً 9200). آی‌پی نداری؟ ⌕ Scan را بزن. اگه رسیور ما هنوز بالا نیست، ⬆ ELF را بزن: خودش pkg-receiver.elf را به PLDMGR آپلود و اجرا می‌کنه، بدون نیاز به پورت لودر. دکمه Upload خود داشبورد هم کار می‌کنه — هر ELFای از گوشی انتخاب کن.\n\n"
                 + "۷) تب Payloads: لیست پیلودهای ابری (همون منبعی که PLDMGR استفاده می‌کنه) با اینترنت گوشی دانلود می‌شه — عالی برای کنسول آفلاین. ⬇ Get پیلود رو روی گوشی ذخیره می‌کنه (با چک sha)، ⬆ Send از طریق PLDMGR می‌فرستش رو کنسول. ⬇ Get all همه ناقص‌ها/آپدیت‌ها رو یکجا می‌گیره.\n\n"
                 + "نکته: اگه Test وصل نشد، آی‌پی را چک کن و مطمئن شو مودم اجازه می‌ده دستگاه‌های وای‌فای همدیگه رو ببینن (تو تنظیمات وای‌فای مودم گزینه‌ای به اسم AP/Client Isolation هست — باید خاموش باشه)."
         };
