@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Android.App;
@@ -116,6 +117,31 @@ public sealed class MainActivity : Activity
     LinearLayout? _payloadPage;
     MaterialButton? _tabPkgs;
     MaterialButton? _tabPld;
+    MaterialButton? _tabRepo;
+    LinearLayout? _repoPage;
+    LinearLayout? _repoBox;
+    TextView? _repoStatus;
+    MaterialButton? _repoRefreshBtn;
+    MaterialButton? _repoAllBtn;
+    readonly List<RepoItem> _repo = new();
+    bool _repoFetched;
+    bool _repoBusy;
+    const string PldmgrRepoUrl = "https://itsplk.github.io/ps5-payloads-mirror/payloads.json";
+
+    sealed class RepoItem
+    {
+        public string Name = "";
+        public string Filename = "";
+        public string Url = "";
+        public string Version = "";
+        public string Category = "";
+        public string Description = "";
+        public string Checksum = "";
+        public string Updated = "";
+        public MaterialButton? GetBtn;
+        public MaterialButton? SendBtn;
+        public TextView? StateView;
+    }
     TextInputEditText? _pldPort;
     TextInputEditText? _pldIp;
     MaterialButton? _scanBtn;
@@ -227,16 +253,21 @@ public sealed class MainActivity : Activity
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         trp.TopMargin = Dp(8);
         tabRow.LayoutParameters = trp;
-        _tabPkgs = TonalBtn("📦 Packages", () => ShowPage(false));
+        _tabPkgs = TonalBtn("📦 Packages", () => ShowPage(0));
         _tabPkgs.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         tabRow.AddView(_tabPkgs);
-        _tabPld = TonalBtn("🚀 Payloads", () => ShowPage(true));
+        _tabPld = TonalBtn("🚀 Payloads", () => ShowPage(1));
         var tpp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         tpp.LeftMargin = Dp(8);
         _tabPld.LayoutParameters = tpp;
         tabRow.AddView(_tabPld);
+        _tabRepo = TonalBtn("📥 Repo", () => ShowPage(2));
+        var trp2 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        trp2.LeftMargin = Dp(8);
+        _tabRepo.LayoutParameters = trp2;
+        tabRow.AddView(_tabRepo);
         root.AddView(tabRow);
-        PaintTabs(false);
+        PaintTabs(0);
         // lay (built below) is the main body
         lay.LayoutParameters = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, 0, 1f);
@@ -324,6 +355,42 @@ public sealed class MainActivity : Activity
         _pldWeb.SetWebChromeClient(new PldChromeClient(this));
         _payloadPage.AddView(_pldWeb);
         root.AddView(_payloadPage);
+
+        // repo page: cloud payload repository (phone downloads, sends via PLDMGR)
+        _repoPage = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        _repoPage.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, 0, 1f);
+        _repoPage.SetPadding(pad, Dp(4), pad, 0);
+        _repoPage.Visibility = ViewStates.Gone;
+        var repoRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        repoRow.SetGravity(GravityFlags.CenterVertical);
+        _repoRefreshBtn = TonalBtn("⟳ Refresh", () => _ = RefreshRepoAsync());
+        _repoRefreshBtn.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        repoRow.AddView(_repoRefreshBtn);
+        _repoAllBtn = TonalBtn("⬇ Get all", () => _ = GetAllRepoAsync());
+        var rab = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        rab.LeftMargin = Dp(8);
+        rab.Gravity = GravityFlags.CenterVertical;
+        _repoAllBtn.LayoutParameters = rab;
+        repoRow.AddView(_repoAllBtn);
+        _repoPage.AddView(repoRow);
+        _repoStatus = new TextView(this) { Text = "" };
+        _repoStatus.TextSize = 12;
+        _repoStatus.SetTextColor(_subColor);
+        _repoStatus.SetSingleLine(true);
+        _repoStatus.Ellipsize = Android.Text.TextUtils.TruncateAt.Start;
+        var rsp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        rsp.TopMargin = Dp(4);
+        rsp.BottomMargin = Dp(4);
+        _repoStatus.LayoutParameters = rsp;
+        _repoPage.AddView(_repoStatus);
+        var repoScroll = new ScrollView(this);
+        repoScroll.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, 0, 1f);
+        _repoBox = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        repoScroll.AddView(_repoBox);
+        _repoPage.AddView(repoScroll);
+        root.AddView(_repoPage);
 
         // decode logo once for hero art
         Bitmap? heroLogo = null;
@@ -526,7 +593,7 @@ public sealed class MainActivity : Activity
         });
     }
 
-    void PaintTabs(bool payload)
+    void PaintTabs(int page)
     {
         try
         {
@@ -534,28 +601,28 @@ public sealed class MainActivity : Activity
             var onTx = Dyn("colorOnPrimaryContainer", Color.Black);
             var off = Dyn("colorSurfaceContainer", Color.Gray);
             var offTx = Dyn("colorOnSurfaceVariant", Color.Black);
-            if (_tabPkgs != null)
+            MaterialButton?[] tabs = { _tabPkgs, _tabPld, _tabRepo };
+            for (int i = 0; i < tabs.Length; i++)
             {
-                _tabPkgs.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(payload ? off : on);
-                _tabPkgs.SetTextColor(payload ? offTx : onTx);
-            }
-            if (_tabPld != null)
-            {
-                _tabPld.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(payload ? on : off);
-                _tabPld.SetTextColor(payload ? onTx : offTx);
+                var b = tabs[i];
+                if (b == null) continue;
+                bool active = i == page;
+                b.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(active ? on : off);
+                b.SetTextColor(active ? onTx : offTx);
             }
         }
         catch { }
     }
 
-    void ShowPage(bool payload)
+    void ShowPage(int page) // 0 packages, 1 payloads, 2 repo
     {
         try
         {
-            if (_senderPage != null) _senderPage.Visibility = payload ? ViewStates.Gone : ViewStates.Visible;
-            if (_payloadPage != null) _payloadPage.Visibility = payload ? ViewStates.Visible : ViewStates.Gone;
-            PaintTabs(payload);
-            if (payload)
+            if (_senderPage != null) _senderPage.Visibility = page == 0 ? ViewStates.Visible : ViewStates.Gone;
+            if (_payloadPage != null) _payloadPage.Visibility = page == 1 ? ViewStates.Visible : ViewStates.Gone;
+            if (_repoPage != null) _repoPage.Visibility = page == 2 ? ViewStates.Visible : ViewStates.Gone;
+            PaintTabs(page);
+            if (page == 1)
             {
                 try
                 {
@@ -567,6 +634,7 @@ public sealed class MainActivity : Activity
                 catch { }
                 if (!_pldLoaded) OpenPayloadUrl();
             }
+            if (page == 2 && !_repoFetched) _ = RefreshRepoAsync();
         }
         catch { }
     }
@@ -727,62 +795,70 @@ public sealed class MainActivity : Activity
     }
 
     /// <summary>
-    /// Sends the bundled pkg-receiver.elf through PLDMGR itself:
-    /// POST raw bytes to /manage:upload?filename=… then GET /loadpayload:…
-    /// to launch it. No loader port needed — works even if PLDMGR was
-    /// loaded first (the receiver kills any previous instance of itself).
+    /// Sends a payload file through PLDMGR itself: POST raw bytes to
+    /// /manage:upload?filename=… then GET /loadpayload:… to launch it.
+    /// No loader port needed — works even if PLDMGR was loaded first.
     /// Progress goes to say(); returns (ok, final message).
     /// </summary>
-    async Task<(bool Ok, string Msg)> PushReceiverToPldmgrAsync(string ip, int port, Action<string> say)
+    async Task<(bool Ok, string Msg)> PushFileToPldmgrAsync(string ip, int port, string filename, byte[] bytes, Action<string> say)
     {
         if (_elfBusy) return (false, "busy — wait a moment");
         _elfBusy = true;
         try
         {
-            say($"uploading receiver to PLDMGR {ip}:{port}…");
-            byte[] elf = await Task.Run(() =>
-            {
-                using var emb = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.pkg-receiver.elf")
-                    ?? throw new IOException("bundled ELF missing");
-                using var ms = new MemoryStream();
-                emb.CopyTo(ms);
-                return ms.ToArray();
-            });
-            using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromSeconds(60) };
+            say($"uploading {filename} to PLDMGR {ip}:{port}…");
+            using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromSeconds(90) };
             using var up = await http.PostAsync(
-                $"http://{ip}:{port}/manage:upload?filename=pkg-receiver.elf",
-                new System.Net.Http.ByteArrayContent(elf));
+                $"http://{ip}:{port}/manage:upload?filename={Uri.EscapeDataString(filename)}",
+                new System.Net.Http.ByteArrayContent(bytes));
             string upBody = (await up.Content.ReadAsStringAsync()).Trim();
             if (!up.IsSuccessStatusCode || !upBody.Contains("OK"))
                 return (false, $"upload HTTP {(int)up.StatusCode} {Short(upBody)}");
-            say("uploaded — launching receiver…");
+            say("uploaded — launching…");
             using var http2 = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromSeconds(20) };
-            using var ln = await http2.GetAsync($"http://{ip}:{port}/loadpayload:pkg-receiver.elf");
+            using var ln = await http2.GetAsync($"http://{ip}:{port}/loadpayload:{Uri.EscapeDataString(filename)}");
             string lnBody = (await ln.Content.ReadAsStringAsync()).Trim();
             if (ln.IsSuccessStatusCode && lnBody.Contains("OK"))
-                return (true, "receiver live — Test it from the IP row");
+                return (true, $"{filename} live");
             return (false, $"uploaded, launch HTTP {(int)ln.StatusCode} — tap it in INSTALLED list");
         }
         catch (Exception ex) { return (false, "send failed: " + Short(ex.Message)); }
         finally { _elfBusy = false; }
     }
 
-    async Task UploadReceiverViaPldmgrAsync()
+    async Task<byte[]> BundledReceiverBytesAsync() => await Task.Run(() =>
     {
-        string ip = (_pldIp?.Text ?? "").Trim();
+        using var emb = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.pkg-receiver.elf")
+            ?? throw new IOException("bundled ELF missing");
+        using var ms = new MemoryStream();
+        emb.CopyTo(ms);
+        return ms.ToArray();
+    });
+
+    /// <summary>Console target shared by payload/repo sends: IP with fallbacks + PLDMGR web port.</summary>
+    bool RepoConsoleTarget(out string ip, out int port)
+    {
+        ip = (_pldIp?.Text ?? "").Trim();
         if (string.IsNullOrEmpty(ip) || ip.EndsWith("."))
         {
-            // fall back to the Packages tab field
             ip = (_psIp?.Text ?? "").Trim();
-            if (!string.IsNullOrEmpty(ip)) SetPayloadIp(ip);
+            if (!string.IsNullOrEmpty(ip) && !ip.EndsWith(".")) SetPayloadIp(ip);
         }
-        if (string.IsNullOrEmpty(ip) || ip.EndsWith(".")) { PldSay("set the console IP first (or ⌕ Scan)"); return; }
-        int port = PldmgrPort();
+        port = PldmgrPort();
+        return !string.IsNullOrEmpty(ip) && !ip.EndsWith(".");
+    }
+
+    async Task UploadReceiverViaPldmgrAsync()
+    {
+        if (!RepoConsoleTarget(out string ip, out int port)) { PldSay("set the console IP first (or ⌕ Scan)"); return; }
         var btn = _uploadElfBtn;
         if (btn != null) RunOnUiThread(() => btn.Enabled = false);
         try
         {
-            var (ok, msg) = await PushReceiverToPldmgrAsync(ip, port, PldSay);
+            byte[] elf;
+            try { elf = await BundledReceiverBytesAsync(); }
+            catch (Exception ex) { PldSay("bundled ELF missing: " + Short(ex.Message)); return; }
+            var (ok, msg) = await PushFileToPldmgrAsync(ip, port, "pkg-receiver.elf", elf, PldSay);
             PldSay(msg);
             if (ok) _pldWeb?.Reload();
         }
@@ -798,11 +874,325 @@ public sealed class MainActivity : Activity
         if (btn != null) RunOnUiThread(() => btn.Enabled = false);
         try
         {
-            var (ok, msg) = await PushReceiverToPldmgrAsync(ip, port, m => ElfSay(null, m));
+            byte[] elf;
+            try { elf = await BundledReceiverBytesAsync(); }
+            catch (Exception ex) { ElfSay(false, "bundled ELF missing: " + Short(ex.Message)); return; }
+            var (ok, msg) = await PushFileToPldmgrAsync(ip, port, "pkg-receiver.elf", elf, m => ElfSay(null, m));
             ElfSay(ok, msg);
             if (ok) Say("receiver live — Test, then Send queue");
         }
         finally { if (btn != null) RunOnUiThread(() => btn.Enabled = true); }
+    }
+
+    // ---------- cloud payload repository (phone-side, works with offline console) ----------
+
+    void RepoSay(string s) => RunOnUiThread(() =>
+    {
+        try { if (_repoStatus != null) _repoStatus.Text = s; } catch { }
+    });
+
+    static string RepoSafeName(string f)
+    {
+        foreach (char c in new[] { '/', '\\', ':', '*', '?', '"', '<', '>', '|' })
+            f = f.Replace(c, '_');
+        f = f.Trim();
+        if (f.Length > 120) f = f[..120];
+        return string.IsNullOrEmpty(f) ? "payload.elf" : f;
+    }
+
+    string RepoFilePath(string filename)
+    {
+        string dir = System.IO.Path.Combine(CacheDir!.AbsolutePath, "pldmgr_repo");
+        try { Directory.CreateDirectory(dir); } catch { }
+        return System.IO.Path.Combine(dir, RepoSafeName(filename));
+    }
+
+    string SavedRepoVersion(string filename)
+    {
+        try { return GetPreferences(FileCreationMode.Private).GetString("repo_ver_" + RepoSafeName(filename), "") ?? ""; }
+        catch { return ""; }
+    }
+
+    static string RepoStr(JsonElement e, string key)
+    {
+        try
+        {
+            if (e.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
+                return v.GetString() ?? "";
+        }
+        catch { }
+        return "";
+    }
+
+    async Task RefreshRepoAsync()
+    {
+        var rb = _repoRefreshBtn;
+        if (rb != null) RunOnUiThread(() => rb.Enabled = false);
+        try
+        {
+            RepoSay("fetching repository…");
+            string json = await Task.Run(async () =>
+            {
+                using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromSeconds(30) };
+                return await http.GetStringAsync(PldmgrRepoUrl);
+            });
+            var items = new List<RepoItem>();
+            using (var doc = JsonDocument.Parse(json))
+            {
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    foreach (var e in doc.RootElement.EnumerateArray())
+                    {
+                        string fn = RepoStr(e, "filename");
+                        string url = RepoStr(e, "url");
+                        if (string.IsNullOrEmpty(fn) || string.IsNullOrEmpty(url)) continue;
+                        items.Add(new RepoItem
+                        {
+                            Name = RepoStr(e, "name"),
+                            Filename = fn,
+                            Url = url,
+                            Version = RepoStr(e, "version"),
+                            Category = RepoStr(e, "category"),
+                            Description = RepoStr(e, "description"),
+                            Checksum = RepoStr(e, "checksum"),
+                            Updated = RepoStr(e, "last_update"),
+                        });
+                    }
+            }
+            lock (_repo) { _repo.Clear(); _repo.AddRange(items); }
+            _repoFetched = true;
+            BuildRepoList();
+            RepoSay(items.Count == 0 ? "repository empty — retry" : $"{items.Count} payloads");
+        }
+        catch (Exception ex) { RepoSay("repo fetch failed: " + Short(ex.Message)); }
+        finally { if (rb != null) RunOnUiThread(() => rb.Enabled = true); }
+    }
+
+    void BuildRepoList()
+    {
+        try
+        {
+            var box = _repoBox;
+            if (box == null) return;
+            RunOnUiThread(() =>
+            {
+                try
+                {
+                    box.RemoveAllViews();
+                    List<RepoItem> items;
+                    lock (_repo) items = new List<RepoItem>(_repo);
+                    if (items.Count == 0)
+                    {
+                        var t = new TextView(this) { Text = "no payloads — tap ⟳ Refresh (needs phone internet)" };
+                        t.SetTextColor(_subColor); t.TextSize = 13;
+                        box.AddView(t);
+                        return;
+                    }
+                    foreach (var it in items) box.AddView(RepoCard(it));
+                }
+                catch { }
+            });
+        }
+        catch { }
+    }
+
+    MaterialCardView RepoCard(RepoItem it)
+    {
+        var card = new MaterialCardView(this);
+        var cp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        cp.TopMargin = Dp(8);
+        card.LayoutParameters = cp;
+        card.Radius = Dp(16);
+        card.CardElevation = Dp(0);
+        try { card.SetCardBackgroundColor(Dyn("colorSurfaceContainer", Color.ParseColor("#F3EDF7"))); } catch { }
+        var ci = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        ci.SetPadding(Dp(14), Dp(10), Dp(14), Dp(10));
+        card.AddView(ci);
+        string title = string.IsNullOrEmpty(it.Name) ? it.Filename : it.Name;
+        if (!string.IsNullOrEmpty(it.Version)) title += "  " + it.Version;
+        var t = new TextView(this) { Text = title };
+        t.TextSize = 15; t.SetTypeface(null, TypefaceStyle.Bold);
+        t.SetSingleLine(true); t.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        try { t.SetTextColor(Dyn("colorOnSurface", Color.Black)); } catch { }
+        ci.AddView(t);
+        string sub = it.Category;
+        if (!string.IsNullOrEmpty(it.Updated)) sub += (sub == "" ? "" : " • ") + it.Updated;
+        sub += (sub == "" ? "" : " • ") + it.Filename;
+        var s = new TextView(this) { Text = sub };
+        s.TextSize = 12; s.SetTextColor(_subColor);
+        s.SetSingleLine(true); s.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        ci.AddView(s);
+        if (!string.IsNullOrEmpty(it.Description))
+        {
+            var d = new TextView(this) { Text = it.Description };
+            d.TextSize = 12; d.SetTextColor(_subColor);
+            d.SetMaxLines(2); d.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+            ci.AddView(d);
+        }
+        it.StateView = new TextView(this) { Text = "" };
+        it.StateView.TextSize = 12;
+        it.StateView.SetTextColor(_subColor);
+        it.StateView.SetSingleLine(true);
+        it.StateView.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        ci.AddView(it.StateView);
+        var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        var rp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        rp.TopMargin = Dp(6);
+        row.LayoutParameters = rp;
+        it.GetBtn = TonalBtn("⬇ Get", () => _ = GetRepoItemAsync(it));
+        it.GetBtn.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        it.SendBtn = TonalBtn("⬆ Send", () => _ = SendRepoItemAsync(it));
+        var sp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        sp.LeftMargin = Dp(8);
+        it.SendBtn.LayoutParameters = sp;
+        row.AddView(it.GetBtn); row.AddView(it.SendBtn);
+        ci.AddView(row);
+        UpdateRepoItemState(it);
+        return card;
+    }
+
+    void UpdateRepoItemState(RepoItem it)
+    {
+        RunOnUiThread(() =>
+        {
+            try
+            {
+                bool exists = File.Exists(RepoFilePath(it.Filename));
+                string saved = SavedRepoVersion(it.Filename);
+                string state;
+                if (!exists) state = "not on phone";
+                else if (!string.IsNullOrEmpty(it.Version) && saved == it.Version) state = $"on phone • {it.Version} ✓";
+                else if (string.IsNullOrEmpty(saved)) state = "on phone • version unknown";
+                else state = $"update: {saved} → {it.Version}";
+                if (it.StateView != null) it.StateView.Text = state;
+                if (it.SendBtn != null) it.SendBtn.Enabled = exists && !_repoBusy;
+                if (it.GetBtn != null) it.GetBtn.Enabled = !_repoBusy;
+            }
+            catch { }
+        });
+    }
+
+    void RefreshAllRepoStates()
+    {
+        List<RepoItem> items;
+        lock (_repo) items = new List<RepoItem>(_repo);
+        foreach (var it in items) UpdateRepoItemState(it);
+    }
+
+    async Task GetRepoItemAsync(RepoItem it)
+    {
+        if (_repoBusy) return;
+        _repoBusy = true;
+        RefreshAllRepoStates();
+        try
+        {
+            RepoSay($"⬇ {it.Filename}…");
+            byte[] bytes = await Task.Run(async () =>
+            {
+                using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromMinutes(5) };
+                return await http.GetByteArrayAsync(it.Url);
+            });
+            if (!string.IsNullOrEmpty(it.Checksum))
+            {
+                string hex;
+                try
+                {
+                    using var sha = System.Security.Cryptography.SHA256.Create();
+                    hex = Convert.ToHexString(sha.ComputeHash(bytes)).ToLowerInvariant();
+                }
+                catch { hex = ""; }
+                if (!string.IsNullOrEmpty(hex) && hex != it.Checksum.ToLowerInvariant())
+                    throw new IOException("sha256 mismatch — retry");
+            }
+            string path = RepoFilePath(it.Filename);
+            await Task.Run(() => File.WriteAllBytes(path, bytes));
+            try { GetPreferences(FileCreationMode.Private).Edit().PutString("repo_ver_" + RepoSafeName(it.Filename), it.Version).Apply(); } catch { }
+            RepoSay($"saved {it.Filename} ({bytes.Length / 1024} KB)");
+        }
+        catch (Exception ex) { RepoSay($"get failed: {Short(ex.Message)}"); }
+        finally
+        {
+            _repoBusy = false;
+            UpdateRepoItemState(it);
+            RefreshAllRepoStates();
+        }
+    }
+
+    async Task GetAllRepoAsync()
+    {
+        if (_repoBusy) return;
+        List<RepoItem> items;
+        lock (_repo) items = new List<RepoItem>(_repo);
+        if (items.Count == 0) { RepoSay("refresh the list first"); return; }
+        var btn = _repoAllBtn;
+        _repoBusy = true;
+        if (btn != null) RunOnUiThread(() => btn.Enabled = false);
+        RefreshAllRepoStates();
+        try
+        {
+            int done = 0, skipped = 0, failed = 0;
+            foreach (var it in items)
+            {
+                bool exists = File.Exists(RepoFilePath(it.Filename));
+                string saved = SavedRepoVersion(it.Filename);
+                if (exists && !string.IsNullOrEmpty(it.Version) && saved == it.Version) { skipped++; continue; }
+                RepoSay($"⬇ {done + failed + 1}/{items.Count} {it.Filename}…");
+                try
+                {
+                    byte[] bytes = await Task.Run(async () =>
+                    {
+                        using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromMinutes(5) };
+                        return await http.GetByteArrayAsync(it.Url);
+                    });
+                    if (!string.IsNullOrEmpty(it.Checksum))
+                    {
+                        string hex = "";
+                        try
+                        {
+                            using var sha = System.Security.Cryptography.SHA256.Create();
+                            hex = Convert.ToHexString(sha.ComputeHash(bytes)).ToLowerInvariant();
+                        }
+                        catch { }
+                        if (!string.IsNullOrEmpty(hex) && hex != it.Checksum.ToLowerInvariant())
+                            throw new IOException("sha256 mismatch");
+                    }
+                    await Task.Run(() => File.WriteAllBytes(RepoFilePath(it.Filename), bytes));
+                    try { GetPreferences(FileCreationMode.Private).Edit().PutString("repo_ver_" + RepoSafeName(it.Filename), it.Version).Apply(); } catch { }
+                    done++;
+                }
+                catch { failed++; }
+                UpdateRepoItemState(it);
+            }
+            RepoSay($"done: {done} downloaded, {skipped} up-to-date, {failed} failed");
+        }
+        finally
+        {
+            _repoBusy = false;
+            if (btn != null) RunOnUiThread(() => btn.Enabled = true);
+            RefreshAllRepoStates();
+        }
+    }
+
+    async Task SendRepoItemAsync(RepoItem it)
+    {
+        if (_repoBusy) return;
+        string path = RepoFilePath(it.Filename);
+        if (!File.Exists(path)) { RepoSay("Get it first"); return; }
+        if (!RepoConsoleTarget(out string ip, out int port)) { RepoSay("set the console IP first"); return; }
+        _repoBusy = true;
+        RefreshAllRepoStates();
+        try
+        {
+            byte[] bytes = await Task.Run(() => File.ReadAllBytes(path));
+            var (ok, msg) = await PushFileToPldmgrAsync(ip, port, RepoSafeName(it.Filename),
+                bytes, m => RunOnUiThread(() => { try { if (it.StateView != null) it.StateView.Text = m; } catch { } }));
+            RunOnUiThread(() => { try { if (it.StateView != null) it.StateView.Text = msg; } catch { } });
+            RepoSay(ok ? $"{it.Filename} live" : msg);
+        }
+        finally
+        {
+            _repoBusy = false;
+            RefreshAllRepoStates();
+        }
     }
 
     bool StartPldFileChooser(IValueCallback? cb)
@@ -1015,6 +1405,7 @@ public sealed class MainActivity : Activity
                 + "4) Type the console IP above and tap Test. Green = connected.\n\n"
                 + "5) Tap + Add PKG / Image, tick the games, then Send queue. PKGs install on the console; disc images are copied to /data/homebrew. Keep the phone awake and don't leave the app mid-transfer.\n\n"
                 + "6) Payloads tab: opens the Payload Manager (PLDMGR) web dashboard running on your console — same console IP, port 8084 by default (change it for other tools, e.g. 9200). No IP? Tap ⌕ Scan. If our receiver isn't running yet, tap ⬆ Our ELF: it uploads pkg-receiver.elf to PLDMGR and launches it, no loader port needed. The dashboard's own Upload button works too — pick any ELF from the phone.\n\n"
+                + "7) Repo tab: cloud payload list (same source PLDMGR uses) downloaded with the phone's internet — perfect for an offline console. ⬇ Get saves a payload on the phone (sha-checked), ⬆ Send pushes it to the console through PLDMGR. ⬇ Get all grabs every missing/update.\n\n"
                 + "Tip: if Test can't reach the console, check the IP, and make sure the modem lets Wi-Fi devices talk to each other (a modem setting called AP/Client Isolation must be OFF).\n\n"
                 + "————————————————\n\n"
                 + "بهترین حالت (پیشنهادی)\n"
@@ -1024,6 +1415,7 @@ public sealed class MainActivity : Activity
                 + "۴) آی‌پی کنسول را بالا وارد کن و Test را بزن. سبز شد یعنی وصله.\n\n"
                 + "۵) با + Add PKG / Image بازی اضافه کن (PKG یا ایمیج دیسک — ایمیج‌ها توی /data/homebrew کپی می‌شن)، تیک بزن و Send queue را بزن. وسط انتقال گوشی را خاموش نکن و از برنامه بیرون نرو.\n\n"
                 + "۶) تب Payloads: داشبورد وب Payload Manager (PLDMGR) روی کنسولت را باز می‌کنه — با همان آی‌پی کنسول، پورت پیش‌فرض 8084 (برای ابزار دیگه عوضش کن، مثلاً 9200). آی‌پی نداری؟ ⌕ Scan را بزن. اگه رسیور ما هنوز بالا نیست، ⬆ Our ELF را بزن: خودش pkg-receiver.elf را به PLDMGR آپلود و اجرا می‌کنه، بدون نیاز به پورت لودر. دکمه Upload خود داشبورد هم کار می‌کنه — هر ELFای از گوشی انتخاب کن.\n\n"
+                + "۷) تب Repo: لیست پیلودهای ابری (همون منبعی که PLDMGR استفاده می‌کنه) با اینترنت گوشی دانلود می‌شه — عالی برای کنسول آفلاین. ⬇ Get پیلود رو روی گوشی ذخیره می‌کنه (با چک sha)، ⬆ Send از طریق PLDMGR می‌فرستش رو کنسول. ⬇ Get all همه ناقص‌ها/آپدیت‌ها رو یکجا می‌گیره.\n\n"
                 + "نکته: اگه Test وصل نشد، آی‌پی را چک کن و مطمئن شو مودم اجازه می‌ده دستگاه‌های وای‌فای همدیگه رو ببینن (تو تنظیمات وای‌فای مودم گزینه‌ای به اسم AP/Client Isolation هست — باید خاموش باشه)."
         };
         b.SetTextColor(_subColor); b.TextSize = 14;
