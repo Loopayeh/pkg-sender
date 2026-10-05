@@ -285,14 +285,17 @@ public sealed class MainActivity : Activity
         trp.TopMargin = Dp(8);
         tabRow.LayoutParameters = trp;
         _tabPkgs = TonalBtn("📦 Packages", () => ShowPage(0));
+        _tabPkgs.SetMinimumHeight(Dp(48));
         _tabPkgs.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         tabRow.AddView(_tabPkgs);
         _tabPld = TonalBtn("🚀 Payloads", () => ShowPage(1));
+        _tabPld.SetMinimumHeight(Dp(48));
         var tpp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         tpp.LeftMargin = Dp(8);
         _tabPld.LayoutParameters = tpp;
         tabRow.AddView(_tabPld);
-        _tabRepo = TonalBtn("📥 Repo", () => ShowPage(2));
+        _tabRepo = TonalBtn("🌐 Web UI", () => ShowPage(2));
+        _tabRepo.SetMinimumHeight(Dp(48));
         var trp2 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         trp2.LeftMargin = Dp(8);
         _tabRepo.LayoutParameters = trp2;
@@ -682,15 +685,15 @@ public sealed class MainActivity : Activity
         catch { }
     }
 
-    void ShowPage(int page) // 0 packages, 1 payloads, 2 repo
+    void ShowPage(int page) // 0 packages, 1 payloads (repo list), 2 web UI
     {
         try
         {
             if (_senderPage != null) _senderPage.Visibility = page == 0 ? ViewStates.Visible : ViewStates.Gone;
-            if (_payloadPage != null) _payloadPage.Visibility = page == 1 ? ViewStates.Visible : ViewStates.Gone;
-            if (_repoPage != null) _repoPage.Visibility = page == 2 ? ViewStates.Visible : ViewStates.Gone;
+            if (_repoPage != null) _repoPage.Visibility = page == 1 ? ViewStates.Visible : ViewStates.Gone;
+            if (_payloadPage != null) _payloadPage.Visibility = page == 2 ? ViewStates.Visible : ViewStates.Gone;
             PaintTabs(page);
-            if (page == 1)
+            if (page == 2)
             {
                 try
                 {
@@ -702,7 +705,7 @@ public sealed class MainActivity : Activity
                 catch { }
                 if (!_pldLoaded) OpenPayloadUrl();
             }
-            if (page == 2 && !_repoFetched) _ = RefreshRepoAsync();
+            if (page == 1 && !_repoFetched) _ = RefreshRepoAsync();
         }
         catch { }
     }
@@ -1567,8 +1570,8 @@ public sealed class MainActivity : Activity
                 + "3) On PS5, run the exploit first, then load pkg-receiver.elf (it's bundled here — tap Send ELF on the pkg-receiver.elf card; PLDMGR must be running). On PS4, open Remote Package Installer and keep it in focus (minimize only after \"waiting to install\" is done). With GoldHEN: Settings → GoldHEN → Server Settings → enable the servers, then Test will find the console.\n\n"
                 + "4) Type the console IP above and tap Test. Green = connected.\n\n"
                 + "5) Tap + Add PKG / Image, tick the games, then Send queue. PKGs install on the console; disc images are copied to /data/homebrew. Keep the phone awake and don't leave the app mid-transfer.\n\n"
-                + "6) Payloads tab: opens the Payload Manager (PLDMGR) web dashboard running on your console — same console IP, port 8084 by default (change it for other tools, e.g. 9200). No IP? Tap ⌕ Scan. If our receiver isn't running yet, tap ⬆ Our ELF: it uploads pkg-receiver.elf to PLDMGR and launches it, no loader port needed. The dashboard's own Upload button works too — pick any ELF from the phone.\n\n"
-                + "7) Repo tab: cloud payload list (same source PLDMGR uses) downloaded with the phone's internet — perfect for an offline console. ⬇ Get saves a payload on the phone (sha-checked), ⬆ Send pushes it to the console through PLDMGR. ⬇ Get all grabs every missing/update.\n\n"
+                + "6) Web UI tab: opens the Payload Manager (PLDMGR) web dashboard running on your console — same console IP, port 8084 by default (change it for other tools, e.g. 9200). No IP? Tap ⌕ Scan. If our receiver isn't running yet, tap ⬆ Our ELF: it uploads pkg-receiver.elf to PLDMGR and launches it, no loader port needed. The dashboard's own Upload button works too — pick any ELF from the phone.\n\n"
+                + "7) Payloads tab: cloud payload list (same source PLDMGR uses) downloaded with the phone's internet — perfect for an offline console. ⬇ Get saves a payload on the phone (sha-checked), ⬆ Send pushes it to the console through PLDMGR. ⬇ Get all grabs every missing/update.\n\n"
                 + "Tip: if Test can't reach the console, check the IP, and make sure the modem lets Wi-Fi devices talk to each other (a modem setting called AP/Client Isolation must be OFF).\n\n"
                 + "————————————————\n\n"
                 + "بهترین حالت (پیشنهادی)\n"
@@ -1577,8 +1580,8 @@ public sealed class MainActivity : Activity
                 + "۳) روی PS5 اول اکسپلویت را اجرا کن و pkg-receiver.elf را بفرست بالا (از کارت pkg-receiver.elf دکمه Send ELF را بزن — باید PLDMGR بالا باشه). روی PS4 برنامه Remote Package Installer را باز کن و بذار جلو بمونه (بعد از شروع نصب می‌تونی مینیمایزش کنی). با گلدHEN: برو توی Settings ← GoldHEN ← Server Settings و سرورها (Payload/BinLoader Server) را روشن کن، بعد Test کنسول را پیدا می‌کنه.\n\n"
                 + "۴) آی‌پی کنسول را بالا وارد کن و Test را بزن. سبز شد یعنی وصله.\n\n"
                 + "۵) با + Add PKG / Image بازی اضافه کن (PKG یا ایمیج دیسک — ایمیج‌ها توی /data/homebrew کپی می‌شن)، تیک بزن و Send queue را بزن. وسط انتقال گوشی را خاموش نکن و از برنامه بیرون نرو.\n\n"
-                + "۶) تب Payloads: داشبورد وب Payload Manager (PLDMGR) روی کنسولت را باز می‌کنه — با همان آی‌پی کنسول، پورت پیش‌فرض 8084 (برای ابزار دیگه عوضش کن، مثلاً 9200). آی‌پی نداری؟ ⌕ Scan را بزن. اگه رسیور ما هنوز بالا نیست، ⬆ Our ELF را بزن: خودش pkg-receiver.elf را به PLDMGR آپلود و اجرا می‌کنه، بدون نیاز به پورت لودر. دکمه Upload خود داشبورد هم کار می‌کنه — هر ELFای از گوشی انتخاب کن.\n\n"
-                + "۷) تب Repo: لیست پیلودهای ابری (همون منبعی که PLDMGR استفاده می‌کنه) با اینترنت گوشی دانلود می‌شه — عالی برای کنسول آفلاین. ⬇ Get پیلود رو روی گوشی ذخیره می‌کنه (با چک sha)، ⬆ Send از طریق PLDMGR می‌فرستش رو کنسول. ⬇ Get all همه ناقص‌ها/آپدیت‌ها رو یکجا می‌گیره.\n\n"
+                + "۶) تب Web UI: داشبورد وب Payload Manager (PLDMGR) روی کنسولت را باز می‌کنه — با همان آی‌پی کنسول، پورت پیش‌فرض 8084 (برای ابزار دیگه عوضش کن، مثلاً 9200). آی‌پی نداری؟ ⌕ Scan را بزن. اگه رسیور ما هنوز بالا نیست، ⬆ Our ELF را بزن: خودش pkg-receiver.elf را به PLDMGR آپلود و اجرا می‌کنه، بدون نیاز به پورت لودر. دکمه Upload خود داشبورد هم کار می‌کنه — هر ELFای از گوشی انتخاب کن.\n\n"
+                + "۷) تب Payloads: لیست پیلودهای ابری (همون منبعی که PLDMGR استفاده می‌کنه) با اینترنت گوشی دانلود می‌شه — عالی برای کنسول آفلاین. ⬇ Get پیلود رو روی گوشی ذخیره می‌کنه (با چک sha)، ⬆ Send از طریق PLDMGR می‌فرستش رو کنسول. ⬇ Get all همه ناقص‌ها/آپدیت‌ها رو یکجا می‌گیره.\n\n"
                 + "نکته: اگه Test وصل نشد، آی‌پی را چک کن و مطمئن شو مودم اجازه می‌ده دستگاه‌های وای‌فای همدیگه رو ببینن (تو تنظیمات وای‌فای مودم گزینه‌ای به اسم AP/Client Isolation هست — باید خاموش باشه)."
         };
         b.SetTextColor(_subColor); b.TextSize = 14;
