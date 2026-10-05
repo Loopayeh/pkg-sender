@@ -133,6 +133,7 @@ public sealed class MainActivity : Activity
         public string Name = "";
         public string Filename = "";
         public string Url = "";
+        public string SourceDirect = "";
         public string Version = "";
         public string Category = "";
         public string Description = "";
@@ -860,6 +861,7 @@ public sealed class MainActivity : Activity
             catch (Exception ex) { PldSay("bundled ELF missing: " + Short(ex.Message)); return; }
             var (ok, msg) = await PushFileToPldmgrAsync(ip, port, "pkg-receiver.elf", elf, PldSay);
             PldSay(msg);
+            Toast(ok ? "receiver live" : "send failed");
             if (ok) _pldWeb?.Reload();
         }
         finally { if (btn != null) RunOnUiThread(() => btn.Enabled = true); }
@@ -879,6 +881,7 @@ public sealed class MainActivity : Activity
             catch (Exception ex) { ElfSay(false, "bundled ELF missing: " + Short(ex.Message)); return; }
             var (ok, msg) = await PushFileToPldmgrAsync(ip, port, "pkg-receiver.elf", elf, m => ElfSay(null, m));
             ElfSay(ok, msg);
+            Toast(ok ? "receiver live" : "send failed");
             if (ok) Say("receiver live — Test, then Send queue");
         }
         finally { if (btn != null) RunOnUiThread(() => btn.Enabled = true); }
@@ -950,6 +953,7 @@ public sealed class MainActivity : Activity
                             Name = RepoStr(e, "name"),
                             Filename = fn,
                             Url = url,
+                            SourceDirect = RepoStr(e, "source_direct"),
                             Version = RepoStr(e, "version"),
                             Category = RepoStr(e, "category"),
                             Description = RepoStr(e, "description"),
@@ -1064,7 +1068,11 @@ public sealed class MainActivity : Activity
                 else if (string.IsNullOrEmpty(saved)) state = "on phone • version unknown";
                 else state = $"update: {saved} → {it.Version}";
                 if (it.StateView != null) it.StateView.Text = state;
-                if (it.SendBtn != null) it.SendBtn.Enabled = exists && !_repoBusy;
+                if (it.SendBtn != null)
+                {
+                    it.SendBtn.Visibility = exists ? ViewStates.Visible : ViewStates.Gone;
+                    it.SendBtn.Enabled = exists && !_repoBusy;
+                }
                 if (it.GetBtn != null) it.GetBtn.Enabled = !_repoBusy;
             }
             catch { }
@@ -1078,6 +1086,54 @@ public sealed class MainActivity : Activity
         foreach (var it in items) UpdateRepoItemState(it);
     }
 
+    void Toast(string s) => RunOnUiThread(() =>
+    {
+        try { Android.Widget.Toast.MakeText(this, s, ToastLength.Short)?.Show(); } catch { }
+    });
+
+    /// <summary>Streamed download with live % + KB/s. Caller must already be off the UI thread for progress; use RepoSay (it marshals).</summary>
+    async Task<byte[]> DownloadWithProgressAsync(string url, string label, Action<string> progress)
+    {
+        using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromMinutes(10) };
+        using var resp = await http.GetAsync(url, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
+        resp.EnsureSuccessStatusCode();
+        long? total = resp.Content.Headers.ContentLength;
+        using var net = await resp.Content.ReadAsStreamAsync();
+        using var ms = new MemoryStream();
+        var buf = new byte[65536];
+        long got = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        long lastReport = -9999;
+        int r;
+        while ((r = await net.ReadAsync(buf, 0, buf.Length)) > 0)
+        {
+            ms.Write(buf, 0, r);
+            got += r;
+            long now = sw.ElapsedMilliseconds;
+            if (now - lastReport > 400)
+            {
+                lastReport = now;
+                string pct = total > 0 ? $" {got * 100 / total.Value}%" : "";
+                double kbs = now > 0 ? (got / 1024.0) / (now / 1000.0) : 0;
+                progress?.Invoke($"⬇ {label}{pct} • {got / 1024} KB • {kbs:0} KB/s");
+            }
+        }
+        return ms.ToArray();
+    }
+
+    /// <summary>Mirror first, original release (source_direct) as fallback.</summary>
+    async Task<byte[]> DownloadRepoFileAsync(RepoItem it, Action<string> progress)
+    {
+        Exception? last = null;
+        var urls = string.IsNullOrEmpty(it.SourceDirect) ? new[] { it.Url } : new[] { it.Url, it.SourceDirect };
+        foreach (var u in urls)
+        {
+            try { return await DownloadWithProgressAsync(u, it.Filename, progress); }
+            catch (Exception ex) { last = ex; }
+        }
+        throw last ?? new IOException("download failed");
+    }
+
     async Task GetRepoItemAsync(RepoItem it)
     {
         if (_repoBusy) return;
@@ -1085,12 +1141,12 @@ public sealed class MainActivity : Activity
         RefreshAllRepoStates();
         try
         {
-            RepoSay($"⬇ {it.Filename}…");
-            byte[] bytes = await Task.Run(async () =>
+            void Prog(string m)
             {
-                using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromMinutes(5) };
-                return await http.GetByteArrayAsync(it.Url);
-            });
+                RepoSay(m);
+                RunOnUiThread(() => { try { if (it.StateView != null) it.StateView.Text = m; } catch { } });
+            }
+            byte[] bytes = await DownloadRepoFileAsync(it, Prog);
             if (!string.IsNullOrEmpty(it.Checksum))
             {
                 string hex;
@@ -1106,9 +1162,10 @@ public sealed class MainActivity : Activity
             string path = RepoFilePath(it.Filename);
             await Task.Run(() => File.WriteAllBytes(path, bytes));
             try { GetPreferences(FileCreationMode.Private).Edit().PutString("repo_ver_" + RepoSafeName(it.Filename), it.Version).Apply(); } catch { }
-            RepoSay($"saved {it.Filename} ({bytes.Length / 1024} KB)");
+            RepoSay($"saved {it.Filename} ({bytes.Length / 1024} KB) ✓");
+            Toast($"saved {it.Filename}");
         }
-        catch (Exception ex) { RepoSay($"get failed: {Short(ex.Message)}"); }
+        catch (Exception ex) { RepoSay($"get failed: {Short(ex.Message)}"); Toast("download failed"); }
         finally
         {
             _repoBusy = false;
@@ -1135,14 +1192,10 @@ public sealed class MainActivity : Activity
                 bool exists = File.Exists(RepoFilePath(it.Filename));
                 string saved = SavedRepoVersion(it.Filename);
                 if (exists && !string.IsNullOrEmpty(it.Version) && saved == it.Version) { skipped++; continue; }
-                RepoSay($"⬇ {done + failed + 1}/{items.Count} {it.Filename}…");
+                int n = done + failed + skipped + 1;
                 try
                 {
-                    byte[] bytes = await Task.Run(async () =>
-                    {
-                        using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromMinutes(5) };
-                        return await http.GetByteArrayAsync(it.Url);
-                    });
+                    byte[] bytes = await DownloadRepoFileAsync(it, m => RepoSay($"[{n}/{items.Count}] {m}"));
                     if (!string.IsNullOrEmpty(it.Checksum))
                     {
                         string hex = "";
@@ -1163,6 +1216,7 @@ public sealed class MainActivity : Activity
                 UpdateRepoItemState(it);
             }
             RepoSay($"done: {done} downloaded, {skipped} up-to-date, {failed} failed");
+            Toast($"done: {done} new, {failed} failed");
         }
         finally
         {
@@ -1186,7 +1240,8 @@ public sealed class MainActivity : Activity
             var (ok, msg) = await PushFileToPldmgrAsync(ip, port, RepoSafeName(it.Filename),
                 bytes, m => RunOnUiThread(() => { try { if (it.StateView != null) it.StateView.Text = m; } catch { } }));
             RunOnUiThread(() => { try { if (it.StateView != null) it.StateView.Text = msg; } catch { } });
-            RepoSay(ok ? $"{it.Filename} live" : msg);
+            RepoSay(ok ? $"{it.Filename} live ✓" : msg);
+            Toast(ok ? $"{it.Filename} sent" : "send failed");
         }
         finally
         {
