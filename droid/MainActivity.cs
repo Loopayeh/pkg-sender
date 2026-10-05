@@ -21,6 +21,7 @@ using Google.Android.Material.Dialog;
 using Google.Android.Material.ProgressIndicator;
 using Google.Android.Material.Tabs;
 using Google.Android.Material.TextField;
+using Android.Webkit;
 using LoopDPI.Core;
 
 namespace PkgSender.Droid;
@@ -99,6 +100,14 @@ public sealed class MainActivity : Activity
     MaterialButton? _testBtn;
     MaterialButton? _detectBtn;
     TextView? _elfStatus;
+    LinearLayout? _senderPage;
+    LinearLayout? _payloadPage;
+    MaterialButton? _tabPkgs;
+    MaterialButton? _tabPld;
+    TextInputEditText? _pldPort;
+    WebView? _pldWeb;
+    TextView? _pldStatus;
+    bool _pldLoaded;
     RangeFileServer? _server;
     bool _busy;
     Color _subColor = Color.Gray;
@@ -194,10 +203,79 @@ public sealed class MainActivity : Activity
         var root = new LinearLayout(this) { Orientation = Orientation.Vertical };
         try { root.SetBackgroundColor(Dyn("colorSurface", Color.White)); } catch { }
         root.AddView(bar);
+        // tabs: Packages | Payloads (PLDMGR web UI inside the app)
+        var tabRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        var trp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        trp.TopMargin = Dp(8);
+        tabRow.LayoutParameters = trp;
+        _tabPkgs = TonalBtn("📦 Packages", () => ShowPage(false));
+        _tabPkgs.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        tabRow.AddView(_tabPkgs);
+        _tabPld = TonalBtn("🚀 Payloads", () => ShowPage(true));
+        var tpp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        tpp.LeftMargin = Dp(8);
+        _tabPld.LayoutParameters = tpp;
+        tabRow.AddView(_tabPld);
+        root.AddView(tabRow);
+        PaintTabs(false);
         // lay (built below) is the main body
         lay.LayoutParameters = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, 0, 1f);
         root.AddView(lay);
+        _senderPage = lay;
+
+        // payload page: PLDMGR web UI (console IP + editable port, default 8084)
+        _payloadPage = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        _payloadPage.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, 0, 1f);
+        _payloadPage.SetPadding(pad, Dp(4), pad, 0);
+        _payloadPage.Visibility = ViewStates.Gone;
+        var pldRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        pldRow.SetGravity(GravityFlags.CenterVertical);
+        var portWrap = new TextInputLayout(this, null, MatAttr("textInputOutlinedStyle"));
+        portWrap.Hint = "Port (PLDMGR: 8084)";
+        portWrap.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        _pldPort = new TextInputEditText(portWrap.Context);
+        _pldPort.InputType = Android.Text.InputTypes.ClassNumber;
+        string? savedPort = GetPreferences(FileCreationMode.Private).GetString("pldport", null);
+        _pldPort.Text = string.IsNullOrEmpty(savedPort) ? "8084" : savedPort;
+        portWrap.AddView(_pldPort);
+        pldRow.AddView(portWrap);
+        var openBtn = TonalBtn("Open", () => OpenPayloadUrl());
+        var obp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+        obp.LeftMargin = Dp(8);
+        obp.Gravity = GravityFlags.CenterVertical;
+        openBtn.LayoutParameters = obp;
+        pldRow.AddView(openBtn);
+        var reloadBtn = TonalBtn("⟳", () => OpenPayloadUrl());
+        var rbp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+        rbp.LeftMargin = Dp(8);
+        rbp.Gravity = GravityFlags.CenterVertical;
+        reloadBtn.LayoutParameters = rbp;
+        pldRow.AddView(reloadBtn);
+        _payloadPage.AddView(pldRow);
+        _pldStatus = new TextView(this) { Text = "" };
+        _pldStatus.TextSize = 12;
+        _pldStatus.SetTextColor(_subColor);
+        _pldStatus.SetSingleLine(true);
+        _pldStatus.Ellipsize = Android.Text.TextUtils.TruncateAt.Start;
+        var psp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        psp.TopMargin = Dp(4);
+        psp.BottomMargin = Dp(4);
+        _pldStatus.LayoutParameters = psp;
+        _payloadPage.AddView(_pldStatus);
+        _pldWeb = new WebView(this);
+        _pldWeb.LayoutParameters = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MatchParent, 0, 1f);
+        _pldWeb.Settings.JavaScriptEnabled = true;
+        _pldWeb.Settings.DomStorageEnabled = true;
+        _pldWeb.Settings.LoadWithOverviewMode = true;
+        _pldWeb.Settings.UseWideViewPort = true;
+        _pldWeb.Settings.MediaPlaybackRequiresUserGesture = false;
+        _pldWeb.SetWebViewClient(new WebViewClient());
+        _payloadPage.AddView(_pldWeb);
+        root.AddView(_payloadPage);
 
         // decode logo once for hero art
         Bitmap? heroLogo = null;
@@ -400,6 +478,78 @@ public sealed class MainActivity : Activity
         });
     }
 
+    void PaintTabs(bool payload)
+    {
+        try
+        {
+            var on = Dyn("colorPrimaryContainer", Color.LightGray);
+            var onTx = Dyn("colorOnPrimaryContainer", Color.Black);
+            var off = Dyn("colorSurfaceContainer", Color.Gray);
+            var offTx = Dyn("colorOnSurfaceVariant", Color.Black);
+            if (_tabPkgs != null)
+            {
+                _tabPkgs.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(payload ? off : on);
+                _tabPkgs.SetTextColor(payload ? offTx : onTx);
+            }
+            if (_tabPld != null)
+            {
+                _tabPld.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(payload ? on : off);
+                _tabPld.SetTextColor(payload ? onTx : offTx);
+            }
+        }
+        catch { }
+    }
+
+    void ShowPage(bool payload)
+    {
+        try
+        {
+            if (_senderPage != null) _senderPage.Visibility = payload ? ViewStates.Gone : ViewStates.Visible;
+            if (_payloadPage != null) _payloadPage.Visibility = payload ? ViewStates.Visible : ViewStates.Gone;
+            PaintTabs(payload);
+            if (payload && !_pldLoaded) OpenPayloadUrl();
+        }
+        catch { }
+    }
+
+    void OpenPayloadUrl()
+    {
+        try
+        {
+            string ip = (_psIp?.Text ?? "").Trim();
+            string port = (_pldPort?.Text ?? "").Trim();
+            if (port == "") port = "8084";
+            try { GetPreferences(FileCreationMode.Private).Edit().PutString("pldport", port).Apply(); } catch { }
+            if (string.IsNullOrEmpty(ip) || ip.EndsWith("."))
+            {
+                if (_pldStatus != null) _pldStatus.Text = "set the console IP first (top of Packages tab)";
+                return;
+            }
+            string url = $"http://{ip}:{port}/";
+            if (_pldStatus != null) _pldStatus.Text = url;
+            _pldWeb?.LoadUrl(url);
+            _pldLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            if (_pldStatus != null) _pldStatus.Text = "open failed: " + ex.Message;
+        }
+    }
+
+    public override void OnBackPressed()
+    {
+        try
+        {
+            if (_payloadPage?.Visibility == ViewStates.Visible && _pldWeb != null && _pldWeb.CanGoBack())
+            {
+                _pldWeb.GoBack();
+                return;
+            }
+        }
+        catch { }
+        base.OnBackPressed();
+    }
+
     void ShowLog()
     {
         var dlg = new BottomSheetDialog(this);
@@ -579,6 +729,7 @@ public sealed class MainActivity : Activity
                 + "3) On PS5, run the exploit first, then load pkg-receiver.elf (it's bundled here — copy it from the pkg-receiver.elf card). On PS4, open Remote Package Installer and keep it in focus (minimize only after \"waiting to install\" is done). With GoldHEN: Settings → GoldHEN → Server Settings → enable the servers, then Test will find the console.\n\n"
                 + "4) Type the console IP above and tap Test. Green = connected.\n\n"
                 + "5) Tap + Add PKG / Image, tick the games, then Send queue. PKGs install on the console; disc images are copied to /data/homebrew. Keep the phone awake and don't leave the app mid-transfer.\n\n"
+                + "6) Payloads tab: opens the Payload Manager (PLDMGR) web dashboard running on your console — same console IP, port 8084 by default. If you use another tool, just change the port (e.g. 9200) and tap Open.\n\n"
                 + "Tip: if Test can't reach the console, check the IP, and make sure the modem lets Wi-Fi devices talk to each other (a modem setting called AP/Client Isolation must be OFF).\n\n"
                 + "————————————————\n\n"
                 + "بهترین حالت (پیشنهادی)\n"
@@ -587,6 +738,7 @@ public sealed class MainActivity : Activity
                 + "۳) روی PS5 اول اکسپلویت را اجرا کن و pkg-receiver.elf را بفرست بالا (فایلش همین‌جا توی برنامه هست — از کارت pkg-receiver.elf کپی بگیر). روی PS4 برنامه Remote Package Installer را باز کن و بذار جلو بمونه (بعد از شروع نصب می‌تونی مینیمایزش کنی). با گلدHEN: برو توی Settings ← GoldHEN ← Server Settings و سرورها (Payload/BinLoader Server) را روشن کن، بعد Test کنسول را پیدا می‌کنه.\n\n"
                 + "۴) آی‌پی کنسول را بالا وارد کن و Test را بزن. سبز شد یعنی وصله.\n\n"
                 + "۵) با + Add PKG / Image بازی اضافه کن (PKG یا ایمیج دیسک — ایمیج‌ها توی /data/homebrew کپی می‌شن)، تیک بزن و Send queue را بزن. وسط انتقال گوشی را خاموش نکن و از برنامه بیرون نرو.\n\n"
+                + "۶) تب Payloads: داشبورد وب Payload Manager (PLDMGR) روی کنسولت را باز می‌کنه — با همان آی‌پی کنسول، پورت پیش‌فرض 8084. اگه ابزار دیگه‌ای استفاده می‌کنی، فقط پورت را عوض کن (مثلاً 9200) و Open را بزن.\n\n"
                 + "نکته: اگه Test وصل نشد، آی‌پی را چک کن و مطمئن شو مودم اجازه می‌ده دستگاه‌های وای‌فای همدیگه رو ببینن (تو تنظیمات وای‌فای مودم گزینه‌ای به اسم AP/Client Isolation هست — باید خاموش باشه)."
         };
         b.SetTextColor(_subColor); b.TextSize = 14;
@@ -1824,6 +1976,7 @@ public sealed class MainActivity : Activity
     protected override void OnDestroy()
     {
         try { _server?.Dispose(); } catch { }
+        try { _pldWeb?.Destroy(); } catch { }
         base.OnDestroy();
     }
 }
