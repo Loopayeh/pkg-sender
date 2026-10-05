@@ -993,7 +993,16 @@ public sealed class MainActivity : Activity
                         box.AddView(t);
                         return;
                     }
-                    foreach (var it in items) box.AddView(RepoCard(it));
+                    // group by category like PLDMGR (its `category` field), A→Z
+                    var groups = items
+                        .GroupBy(x => string.IsNullOrEmpty(x.Category) ? "Uncategorized" : x.Category)
+                        .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+                    foreach (var g in groups)
+                    {
+                        box.AddView(SectionLabel($"{g.Key} ({g.Count()})"));
+                        foreach (var it in g.OrderBy(x => string.IsNullOrEmpty(x.Name) ? x.Filename : x.Name, StringComparer.OrdinalIgnoreCase))
+                            box.AddView(RepoCard(it));
+                    }
                 }
                 catch { }
             });
@@ -1064,18 +1073,25 @@ public sealed class MainActivity : Activity
             {
                 bool exists = File.Exists(RepoFilePath(it.Filename));
                 string saved = SavedRepoVersion(it.Filename);
+                bool current = exists && !string.IsNullOrEmpty(it.Version) && saved == it.Version;
+                bool outdated = exists && !current;
                 string state;
                 if (!exists) state = "not on phone";
-                else if (!string.IsNullOrEmpty(it.Version) && saved == it.Version) state = $"on phone • {it.Version} ✓";
+                else if (current) state = $"on phone • {it.Version} ✓";
                 else if (string.IsNullOrEmpty(saved)) state = "on phone • version unknown";
                 else state = $"update: {saved} → {it.Version}";
                 if (it.StateView != null) it.StateView.Text = state;
+                if (it.GetBtn != null)
+                {
+                    it.GetBtn.Visibility = current ? ViewStates.Gone : ViewStates.Visible;
+                    it.GetBtn.Text = outdated ? "⟳ Update" : "⬇ Get";
+                    it.GetBtn.Enabled = !_repoBusy;
+                }
                 if (it.SendBtn != null)
                 {
                     it.SendBtn.Visibility = exists ? ViewStates.Visible : ViewStates.Gone;
                     it.SendBtn.Enabled = exists && !_repoBusy;
                 }
-                if (it.GetBtn != null) it.GetBtn.Enabled = !_repoBusy;
             }
             catch { }
         });
