@@ -124,6 +124,7 @@ public sealed class MainActivity : Activity
     MaterialButton? _repoRefreshBtn;
     MaterialButton? _repoAllBtn;
     readonly List<RepoItem> _repo = new();
+    readonly HashSet<string> _repoOpen = new(StringComparer.OrdinalIgnoreCase);
     bool _repoFetched;
     bool _repoBusy;
     const string PldmgrRepoUrl = "https://cdn.jsdelivr.net/gh/Loopayeh/ps5-payloads@main/payloads.json";
@@ -993,19 +994,43 @@ public sealed class MainActivity : Activity
                         box.AddView(t);
                         return;
                     }
-                    // group by category like PLDMGR (its `category` field), A→Z
+                    // group by category like PLDMGR (its `category` field), A→Z, collapsible
                     var groups = items
                         .GroupBy(x => string.IsNullOrEmpty(x.Category) ? "Uncategorized" : x.Category)
                         .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
                     foreach (var g in groups)
                     {
-                        box.AddView(SectionLabel($"{g.Key} ({g.Count()})"));
-                        foreach (var it in g.OrderBy(x => string.IsNullOrEmpty(x.Name) ? x.Filename : x.Name, StringComparer.OrdinalIgnoreCase))
-                            box.AddView(RepoCard(it));
+                        string key = g.Key;
+                        var cards = g.OrderBy(x => string.IsNullOrEmpty(x.Name) ? x.Filename : x.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                        var body = new LinearLayout(this) { Orientation = Orientation.Vertical };
+                        foreach (var it in cards) body.AddView(RepoCard(it));
+                        bool open;
+                        lock (_repoOpen) open = _repoOpen.Contains(key);
+                        body.Visibility = open ? ViewStates.Visible : ViewStates.Gone;
+                        var head = TonalBtn("", () => { });
+                        head.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+                        head.Text = (open ? "▾ " : "▸ ") + $"{key} ({cards.Count})";
+                        head.Click += (_, _) => ToggleRepoGroup(key, body, head);
+                        box.AddView(head);
+                        box.AddView(body);
                     }
                 }
                 catch { }
             });
+        }
+        catch { }
+    }
+
+    void ToggleRepoGroup(string key, LinearLayout body, MaterialButton head)
+    {
+        try
+        {
+            bool open = body.Visibility != ViewStates.Visible;
+            body.Visibility = open ? ViewStates.Visible : ViewStates.Gone;
+            lock (_repoOpen) { if (open) _repoOpen.Add(key); else _repoOpen.Remove(key); }
+            string t = head.Text ?? "";
+            if (t.StartsWith("▸ ") || t.StartsWith("▾ ")) t = t[2..];
+            head.Text = (open ? "▾ " : "▸ ") + t;
         }
         catch { }
     }
