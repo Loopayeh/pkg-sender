@@ -120,6 +120,7 @@ public sealed class MainActivity : Activity
     TextInputEditText? _pldIp;
     MaterialButton? _scanBtn;
     MaterialButton? _uploadElfBtn;
+    MaterialButton? _cardSendBtn;
     bool _elfBusy;
     IValueCallback? _pldFileCb;
     WebView? _pldWeb;
@@ -635,8 +636,7 @@ public sealed class MainActivity : Activity
         if (btn != null) RunOnUiThread(() => btn.Enabled = false);
         try
         {
-            string portTxt = (_pldPort?.Text ?? "").Trim();
-            if (!int.TryParse(portTxt, out int port) || port <= 0 || port > 65535) port = 8084;
+            int port = PldmgrPort();
             string? prefix = SubnetPrefix();
             if (string.IsNullOrEmpty(prefix))
             {
@@ -717,31 +717,29 @@ public sealed class MainActivity : Activity
         catch { return null; }
     }
 
+    int PldmgrPort()
+    {
+        string t = (_pldPort?.Text ?? "").Trim();
+        int port = 8084;
+        if (int.TryParse(t, out int p) && p > 0 && p <= 65535) port = p;
+        try { GetPreferences(FileCreationMode.Private).Edit().PutString("pldport", port.ToString()).Apply(); } catch { }
+        return port;
+    }
+
     /// <summary>
     /// Sends the bundled pkg-receiver.elf through PLDMGR itself:
     /// POST raw bytes to /manage:upload?filename=… then GET /loadpayload:…
     /// to launch it. No loader port needed — works even if PLDMGR was
     /// loaded first (the receiver kills any previous instance of itself).
+    /// Progress goes to say(); returns (ok, final message).
     /// </summary>
-    async Task UploadReceiverViaPldmgrAsync()
+    async Task<(bool Ok, string Msg)> PushReceiverToPldmgrAsync(string ip, int port, Action<string> say)
     {
-        if (_elfBusy) return;
-        string ip = (_pldIp?.Text ?? "").Trim();
-        if (string.IsNullOrEmpty(ip) || ip.EndsWith("."))
-        {
-            // fall back to the Packages tab field
-            ip = (_psIp?.Text ?? "").Trim();
-            if (!string.IsNullOrEmpty(ip)) SetPayloadIp(ip);
-        }
-        if (string.IsNullOrEmpty(ip) || ip.EndsWith(".")) { PldSay("set the console IP first (or ⌕ Scan)"); return; }
-        string portTxt = (_pldPort?.Text ?? "").Trim();
-        if (!int.TryParse(portTxt, out int port) || port <= 0 || port > 65535) port = 8084;
-        var btn = _uploadElfBtn;
+        if (_elfBusy) return (false, "busy — wait a moment");
         _elfBusy = true;
-        if (btn != null) RunOnUiThread(() => btn.Enabled = false);
         try
         {
-            PldSay($"uploading receiver to PLDMGR {ip}:{port}…");
+            say($"uploading receiver to PLDMGR {ip}:{port}…");
             byte[] elf = await Task.Run(() =>
             {
                 using var emb = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.pkg-receiver.elf")
@@ -756,23 +754,55 @@ public sealed class MainActivity : Activity
                 new System.Net.Http.ByteArrayContent(elf));
             string upBody = (await up.Content.ReadAsStringAsync()).Trim();
             if (!up.IsSuccessStatusCode || !upBody.Contains("OK"))
-                throw new IOException($"upload HTTP {(int)up.StatusCode} {Short(upBody)}");
-            PldSay("uploaded — launching receiver…");
+                return (false, $"upload HTTP {(int)up.StatusCode} {Short(upBody)}");
+            say("uploaded — launching receiver…");
             using var http2 = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromSeconds(20) };
             using var ln = await http2.GetAsync($"http://{ip}:{port}/loadpayload:pkg-receiver.elf");
             string lnBody = (await ln.Content.ReadAsStringAsync()).Trim();
             if (ln.IsSuccessStatusCode && lnBody.Contains("OK"))
-                PldSay("receiver live — use it from Packages tab (Test)");
-            else
-                PldSay($"uploaded, launch HTTP {(int)ln.StatusCode} — tap it in INSTALLED list");
-            _pldWeb?.Reload();
+                return (true, "receiver live — Test it from the IP row");
+            return (false, $"uploaded, launch HTTP {(int)ln.StatusCode} — tap it in INSTALLED list");
         }
-        catch (Exception ex) { PldSay("send failed: " + Short(ex.Message)); }
-        finally
+        catch (Exception ex) { return (false, "send failed: " + Short(ex.Message)); }
+        finally { _elfBusy = false; }
+    }
+
+    async Task UploadReceiverViaPldmgrAsync()
+    {
+        string ip = (_pldIp?.Text ?? "").Trim();
+        if (string.IsNullOrEmpty(ip) || ip.EndsWith("."))
         {
-            _elfBusy = false;
-            if (btn != null) RunOnUiThread(() => btn.Enabled = true);
+            // fall back to the Packages tab field
+            ip = (_psIp?.Text ?? "").Trim();
+            if (!string.IsNullOrEmpty(ip)) SetPayloadIp(ip);
         }
+        if (string.IsNullOrEmpty(ip) || ip.EndsWith(".")) { PldSay("set the console IP first (or ⌕ Scan)"); return; }
+        int port = PldmgrPort();
+        var btn = _uploadElfBtn;
+        if (btn != null) RunOnUiThread(() => btn.Enabled = false);
+        try
+        {
+            var (ok, msg) = await PushReceiverToPldmgrAsync(ip, port, PldSay);
+            PldSay(msg);
+            if (ok) _pldWeb?.Reload();
+        }
+        finally { if (btn != null) RunOnUiThread(() => btn.Enabled = true); }
+    }
+
+    async Task SendReceiverFromCardAsync()
+    {
+        string ip = (_psIp?.Text ?? "").Trim();
+        if (string.IsNullOrEmpty(ip) || ip.EndsWith(".")) { ElfSay(false, "type the console IP first"); return; }
+        int port = PldmgrPort();
+        var btn = _cardSendBtn;
+        if (btn != null) RunOnUiThread(() => btn.Enabled = false);
+        try
+        {
+            var (ok, msg) = await PushReceiverToPldmgrAsync(ip, port, m => ElfSay(null, m));
+            ElfSay(ok, msg);
+            if (ok) Say("receiver live — Test, then Send queue");
+        }
+        finally { if (btn != null) RunOnUiThread(() => btn.Enabled = true); }
     }
 
     bool StartPldFileChooser(IValueCallback? cb)
@@ -981,7 +1011,7 @@ public sealed class MainActivity : Activity
             Text = "BEST SETUP (recommended)\n"
                 + "1) Connect the console to the modem with a LAN cable — not Wi-Fi. Much faster and more stable.\n\n"
                 + "2) Connect the phone to the same modem's Wi-Fi (5GHz preferred). Phone and console must be on the same network (e.g. both 192.168.1.x).\n\n"
-                + "3) On PS5, run the exploit first, then load pkg-receiver.elf (it's bundled here — copy it from the pkg-receiver.elf card). On PS4, open Remote Package Installer and keep it in focus (minimize only after \"waiting to install\" is done). With GoldHEN: Settings → GoldHEN → Server Settings → enable the servers, then Test will find the console.\n\n"
+                + "3) On PS5, run the exploit first, then load pkg-receiver.elf (it's bundled here — tap Send ELF on the pkg-receiver.elf card; PLDMGR must be running). On PS4, open Remote Package Installer and keep it in focus (minimize only after \"waiting to install\" is done). With GoldHEN: Settings → GoldHEN → Server Settings → enable the servers, then Test will find the console.\n\n"
                 + "4) Type the console IP above and tap Test. Green = connected.\n\n"
                 + "5) Tap + Add PKG / Image, tick the games, then Send queue. PKGs install on the console; disc images are copied to /data/homebrew. Keep the phone awake and don't leave the app mid-transfer.\n\n"
                 + "6) Payloads tab: opens the Payload Manager (PLDMGR) web dashboard running on your console — same console IP, port 8084 by default (change it for other tools, e.g. 9200). No IP? Tap ⌕ Scan. If our receiver isn't running yet, tap ⬆ Our ELF: it uploads pkg-receiver.elf to PLDMGR and launches it, no loader port needed. The dashboard's own Upload button works too — pick any ELF from the phone.\n\n"
@@ -990,7 +1020,7 @@ public sealed class MainActivity : Activity
                 + "بهترین حالت (پیشنهادی)\n"
                 + "۱) کنسول را با کابل لن (LAN) به مودم وصل کن — نه وای‌فای. سرعت و پایداری خیلی بالاتر میره.\n\n"
                 + "۲) گوشی را به وای‌فای همان مودم وصل کن (ترجیحاً باند 5GHz). گوشی و کنسول باید توی یک شبکه باشن (مثلاً هر دو 192.168.1.x).\n\n"
-                + "۳) روی PS5 اول اکسپلویت را اجرا کن و pkg-receiver.elf را بفرست بالا (فایلش همین‌جا توی برنامه هست — از کارت pkg-receiver.elf کپی بگیر). روی PS4 برنامه Remote Package Installer را باز کن و بذار جلو بمونه (بعد از شروع نصب می‌تونی مینیمایزش کنی). با گلدHEN: برو توی Settings ← GoldHEN ← Server Settings و سرورها (Payload/BinLoader Server) را روشن کن، بعد Test کنسول را پیدا می‌کنه.\n\n"
+                + "۳) روی PS5 اول اکسپلویت را اجرا کن و pkg-receiver.elf را بفرست بالا (از کارت pkg-receiver.elf دکمه Send ELF را بزن — باید PLDMGR بالا باشه). روی PS4 برنامه Remote Package Installer را باز کن و بذار جلو بمونه (بعد از شروع نصب می‌تونی مینیمایزش کنی). با گلدHEN: برو توی Settings ← GoldHEN ← Server Settings و سرورها (Payload/BinLoader Server) را روشن کن، بعد Test کنسول را پیدا می‌کنه.\n\n"
                 + "۴) آی‌پی کنسول را بالا وارد کن و Test را بزن. سبز شد یعنی وصله.\n\n"
                 + "۵) با + Add PKG / Image بازی اضافه کن (PKG یا ایمیج دیسک — ایمیج‌ها توی /data/homebrew کپی می‌شن)، تیک بزن و Send queue را بزن. وسط انتقال گوشی را خاموش نکن و از برنامه بیرون نرو.\n\n"
                 + "۶) تب Payloads: داشبورد وب Payload Manager (PLDMGR) روی کنسولت را باز می‌کنه — با همان آی‌پی کنسول، پورت پیش‌فرض 8084 (برای ابزار دیگه عوضش کن، مثلاً 9200). آی‌پی نداری؟ ⌕ Scan را بزن. اگه رسیور ما هنوز بالا نیست، ⬆ Our ELF را بزن: خودش pkg-receiver.elf را به PLDMGR آپلود و اجرا می‌کنه، بدون نیاز به پورت لودر. دکمه Upload خود داشبورد هم کار می‌کنه — هر ELFای از گوشی انتخاب کن.\n\n"
@@ -1066,7 +1096,7 @@ public sealed class MainActivity : Activity
         };
         var d = new TextView(this)
         {
-            Text = "Copy the PS5 receiver to your phone, then send it to the console with a USB stick."
+            Text = "Send the PS5 receiver straight to the console through PLDMGR (jailbreak first, PLDMGR running)."
         };
         d.SetTextColor(_subColor); d.TextSize = 13;
         body.AddView(d);
@@ -1074,13 +1104,13 @@ public sealed class MainActivity : Activity
         var rp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         rp.TopMargin = Dp(10);
         row.LayoutParameters = rp;
-        var copy = TonalBtn("Copy ELF", () => _ = ExportElfAsync());
-        copy.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        _cardSendBtn = TonalBtn("Send ELF", () => _ = SendReceiverFromCardAsync());
+        _cardSendBtn.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1.4f);
         var share = TonalBtn("Share ELF", () => _ = ShareElfAsync());
         var shp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         shp.LeftMargin = Dp(8);
         share.LayoutParameters = shp;
-        row.AddView(copy); row.AddView(share);
+        row.AddView(_cardSendBtn); row.AddView(share);
         body.AddView(row);
         _elfStatus = new TextView(this) { Text = "" };
         _elfStatus.SetTextColor(_subColor); _elfStatus.TextSize = 12;
@@ -1117,43 +1147,6 @@ public sealed class MainActivity : Activity
             File.WriteAllBytes(tmp, ms.ToArray());
             return tmp;
         }
-    }
-
-    async Task ExportElfAsync()
-    {
-        try
-        {
-            ElfSay(null, "copying…");
-            string tmp = await Task.Run(() => ReadBundledElf(out _));
-            string fileName = "pkg-receiver.elf";
-            if ((int)Build.VERSION.SdkInt >= 29)
-            {
-                var cv = new ContentValues();
-                cv.Put(Android.Provider.MediaStore.MediaColumns.DisplayName, fileName);
-                cv.Put(Android.Provider.MediaStore.MediaColumns.MimeType, "application/octet-stream");
-                cv.Put(Android.Provider.MediaStore.MediaColumns.RelativePath, "Download/");
-                var uri = ContentResolver!.Insert(
-                    Android.Provider.MediaStore.Downloads.ExternalContentUri!, cv)
-                    ?? throw new IOException("mediastore insert failed");
-                using (var outS = ContentResolver!.OpenOutputStream(uri)!)
-                using (var inS = File.OpenRead(tmp))
-                    await inS.CopyToAsync(outS);
-            }
-            else
-            {
-                string dst = System.IO.Path.Combine(
-                    Android.OS.Environment.GetExternalStoragePublicDirectory(
-                        Android.OS.Environment.DirectoryDownloads)!.AbsolutePath, fileName);
-#pragma warning disable CS0618
-                using (var outS = File.Create(dst))
-                using (var inS = File.OpenRead(tmp))
-                    await inS.CopyToAsync(outS);
-#pragma warning restore CS0618
-            }
-            ElfSay(true, "saved to Downloads/" + fileName);
-            Say("ELF copied — check Downloads");
-        }
-        catch (Exception ex) { ElfSay(false, "copy failed: " + Short(ex.Message)); }
     }
 
     async Task ShareElfAsync()
