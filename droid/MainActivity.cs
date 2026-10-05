@@ -234,18 +234,31 @@ public sealed class MainActivity : Activity
         lay.SetPadding(pad, 0, pad, pad);
 
         var bar = new MaterialToolbar(this);
-        bar.Title = "LoopFlow";
-        bar.Subtitle = "by Loopayeh";
+        bar.Title = "";
+        // brand row: logo + LoopFlow (custom view so nothing overlaps)
+        var brand = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        brand.SetGravity(GravityFlags.CenterVertical);
+        var bimg = new ImageView(this);
+        bimg.LayoutParameters = new LinearLayout.LayoutParams(Dp(28), Dp(28));
         try
         {
             using var ls = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.logo.png");
             if (ls != null)
                 using (var bmp = BitmapFactory.DecodeStream(ls))
-                    if (bmp != null && Resources != null)
-                        bar.Logo = new BitmapDrawable(Resources,
-                            Bitmap.CreateScaledBitmap(bmp, Dp(30), Dp(30), true));
+                    if (bmp != null)
+                        bimg.SetImageBitmap(Bitmap.CreateScaledBitmap(bmp, Dp(28), Dp(28), true));
         }
         catch { }
+        bimg.SetScaleType(ImageView.ScaleType.CenterCrop);
+        brand.AddView(bimg);
+        var btitle = new TextView(this) { Text = "LoopFlow" };
+        btitle.TextSize = 20; btitle.SetTypeface(null, TypefaceStyle.Bold);
+        try { btitle.SetTextColor(Dyn("colorOnSurface", Color.Black)); } catch { }
+        var btp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+        btp.LeftMargin = Dp(10);
+        btitle.LayoutParameters = btp;
+        brand.AddView(btitle);
+        bar.AddView(brand);
         try
         {
             bar.SetBackgroundColor(Color.Transparent);
