@@ -28,7 +28,7 @@ using LoopDPI.Core;
 
 namespace PkgSender.Droid;
 
-[Activity(Label = "PKG Sender • by Loopayeh", MainLauncher = true, Exported = true, Icon = "@drawable/logo")]
+    [Activity(Label = "LoopFlow • by Loopayeh", MainLauncher = true, Exported = true, Icon = "@drawable/logo")]
 public sealed class MainActivity : Activity
 {
     const int PickReq = 1001;
@@ -228,7 +228,7 @@ public sealed class MainActivity : Activity
         lay.SetPadding(pad, 0, pad, pad);
 
         var bar = new MaterialToolbar(this);
-        bar.Title = "PKG Sender";
+        bar.Title = "LoopFlow";
         try
         {
             bar.SetBackgroundColor(Color.Transparent);
@@ -441,7 +441,7 @@ public sealed class MainActivity : Activity
         var htp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         htp.LeftMargin = Dp(16);
         heroTxt.LayoutParameters = htp;
-        var heroTitle = new TextView(this) { Text = "PKG Sender" };
+        var heroTitle = new TextView(this) { Text = "LoopFlow" };
         heroTitle.TextSize = 22; heroTitle.SetTypeface(null, TypefaceStyle.Bold);
         try { heroTitle.SetTextColor(Dyn("colorOnSurface", Color.Black)); } catch { }
         var heroSub = new TextView(this) { Text = "PS4 / PS5 packages over LAN" };
@@ -1353,7 +1353,7 @@ public sealed class MainActivity : Activity
         var htp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
         htp.LeftMargin = Dp(14);
         ht.LayoutParameters = htp;
-        var t = new TextView(this) { Text = "PKG Sender" };
+        var t = new TextView(this) { Text = "LoopFlow" };
         t.TextSize = 20; t.SetTypeface(null, TypefaceStyle.Bold);
         var ver = new TextView(this) { Text = "1.0.1 (Android) • by Loopayeh" };
         ver.SetTextColor(_subColor); ver.TextSize = 13;
