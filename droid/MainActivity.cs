@@ -106,7 +106,11 @@ public sealed class MainActivity : Activity
     TextView? _statusTitle;
     TextView? _statusDetail;
     MaterialCardView? _statusCard;
-    MaterialCardView? _heroCard;
+    MaterialCardView? _connCard;
+    LinearLayout? _connBody;
+    TextView? _connHead;
+    TextView? _connDot;
+    TextView? _connChev;
     TextView? _connView;
     LinearProgressIndicator? _prog;
     MaterialButton? _sendBtn;
@@ -395,69 +399,52 @@ public sealed class MainActivity : Activity
         _repoPage.AddView(repoScroll);
         root.AddView(_repoPage);
 
-        // decode logo once for hero art
-        Bitmap? heroLogo = null;
-        try
-        {
-            using var s = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.logo.png");
-            if (s != null)
-                using (var bmp = BitmapFactory.DecodeStream(s))
-                    if (bmp != null)
-                        heroLogo = Bitmap.CreateScaledBitmap(bmp, Dp(56), Dp(56), true);
-        }
-        catch { }
-
-        // hero: app identity + console connection in one surface card
-        var hero = new MaterialCardView(this);
+        // merged console card: connection + receiver ELF, collapsible
+        var conn = new MaterialCardView(this);
         var hlp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         hlp.TopMargin = Dp(8);
-        hero.LayoutParameters = hlp;
-        hero.Radius = Dp(24);
-        hero.CardElevation = Dp(0);
-        try { hero.SetCardBackgroundColor(Dyn("colorSurfaceContainer", Color.ParseColor("#F3EDF7"))); } catch { }
-        var heroIn = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        heroIn.SetPadding(Dp(20), Dp(20), Dp(20), Dp(20));
-        hero.AddView(heroIn);
+        conn.LayoutParameters = hlp;
+        conn.Radius = Dp(20);
+        conn.CardElevation = Dp(0);
+        try { conn.SetCardBackgroundColor(Dyn("colorSurfaceContainer", Color.ParseColor("#F3EDF7"))); } catch { }
+        var connIn = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        connIn.SetPadding(Dp(16), Dp(12), Dp(16), Dp(12));
+        conn.AddView(connIn);
+        var connHead = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        connHead.SetGravity(GravityFlags.CenterVertical);
+        connHead.Clickable = true;
+        _connDot = new TextView(this) { Text = "●" };
+        _connDot.TextSize = 16; _connDot.SetTypeface(null, TypefaceStyle.Bold);
+        _connDot.SetTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
+        connHead.AddView(_connDot);
+        _connHead = new TextView(this) { Text = "Console" };
+        _connHead.TextSize = 16; _connHead.SetTypeface(null, TypefaceStyle.Bold);
+        try { _connHead.SetTextColor(Dyn("colorOnSurface", Color.Black)); } catch { }
+        var chp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        chp.LeftMargin = Dp(8);
+        _connHead.LayoutParameters = chp;
+        _connHead.SetSingleLine(true); _connHead.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        connHead.AddView(_connHead);
+        _connChev = new TextView(this) { Text = "▸" };
+        _connChev.TextSize = 16;
+        _connChev.SetTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
+        connHead.AddView(_connChev);
+        connIn.AddView(connHead);
+        _connBody = new LinearLayout(this) { Orientation = Orientation.Vertical };
+        bool connOpen = true;
+        try { connOpen = GetPreferences(FileCreationMode.Private).GetBoolean("conn_open", true); } catch { }
+        _connBody.Visibility = connOpen ? ViewStates.Visible : ViewStates.Gone;
+        _connChev.Text = connOpen ? "▾" : "▸";
+        connHead.Click += (_, _) => ToggleConnCard();
 
-        var heroRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        heroRow.SetGravity(GravityFlags.CenterVertical);
-        var heroImg = new ImageView(this);
-        heroImg.LayoutParameters = new LinearLayout.LayoutParams(Dp(56), Dp(56));
-        if (heroLogo != null) heroImg.SetImageBitmap(heroLogo);
-        else heroImg.SetImageResource(Android.Resource.Drawable.IcMenuGallery);
-        heroImg.SetScaleType(ImageView.ScaleType.CenterCrop);
-        heroImg.Clickable = true;
-        heroImg.Click += (_, _) => ShowAbout();
-        try
-        {
-            var hrd = new GradientDrawable();
-            hrd.SetCornerRadius(Dp(16));
-            hrd.SetColor(Android.Graphics.Color.Transparent);
-            heroImg.SetBackgroundDrawable(hrd);
-            heroImg.ClipToOutline = true;
-        }
-        catch { }
-        heroRow.AddView(heroImg);
-        var heroTxt = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        var htp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
-        htp.LeftMargin = Dp(16);
-        heroTxt.LayoutParameters = htp;
-        var heroTitle = new TextView(this) { Text = "LoopFlow" };
-        heroTitle.TextSize = 22; heroTitle.SetTypeface(null, TypefaceStyle.Bold);
-        try { heroTitle.SetTextColor(Dyn("colorOnSurface", Color.Black)); } catch { }
-        var heroSub = new TextView(this) { Text = "PS4 / PS5 packages over LAN" };
-        heroSub.TextSize = 14;
-        heroSub.SetTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
-        heroTxt.AddView(heroTitle); heroTxt.AddView(heroSub);
-        heroRow.AddView(heroTxt);
-        heroIn.AddView(heroRow);
+        // (app identity lives in the toolbar now; connection card is compact)
 
         // console row: outlined IP + tonal test
         var ipRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
         var ipp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        ipp.TopMargin = Dp(16);
+        ipp.TopMargin = Dp(10);
         ipRow.LayoutParameters = ipp;
         var ipWrap = new TextInputLayout(this, null, MatAttr("textInputOutlinedStyle"));
         ipWrap.Hint = "Console IP, e.g. 192.168.1.105";
@@ -476,24 +463,51 @@ public sealed class MainActivity : Activity
         tbp.Gravity = GravityFlags.CenterVertical;
         _testBtn.LayoutParameters = tbp;
         ipRow.AddView(_testBtn);
-        heroIn.AddView(ipRow);
+        _connBody.AddView(ipRow);
+        _psIp.TextChanged += (_, _) => UpdateConnHead();
         // slim full-width Detect under the IP row: IP keeps full width, no blank gap
         _detectBtn = TonalBtn("⌕ Detect console automatically", () => _ = DetectAsync());
         _detectBtn.TextSize = 13;
         var dbp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         dbp.TopMargin = Dp(8);
         _detectBtn.LayoutParameters = dbp;
-        heroIn.AddView(_detectBtn);
+        _connBody.AddView(_detectBtn);
         _connView = new TextView(this) { Text = "● not tested" };
         _connView.TextSize = 13; _connView.SetTypeface(null, TypefaceStyle.Bold);
         _connView.SetTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
         var cnp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         cnp.TopMargin = Dp(12);
         _connView.LayoutParameters = cnp;
-        heroIn.AddView(_connView);
-        lay.AddView(hero);
-        _heroCard = hero;
-        lay.AddView(BuildElfCard());
+        _connBody.AddView(_connView);
+        // receiver ELF row inside the same card
+        var elfRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        elfRow.SetGravity(GravityFlags.CenterVertical);
+        var erp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
+        erp.TopMargin = Dp(10);
+        elfRow.LayoutParameters = erp;
+        var elfLab = new TextView(this) { Text = "pkg-receiver.elf" };
+        elfLab.TextSize = 13; elfLab.SetTypeface(null, TypefaceStyle.Bold);
+        elfLab.SetTextColor(Dyn("colorOnSurfaceVariant", Color.Gray));
+        elfLab.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
+        elfLab.SetSingleLine(true); elfLab.Ellipsize = Android.Text.TextUtils.TruncateAt.End;
+        elfRow.AddView(elfLab);
+        _cardSendBtn = TonalBtn("Send", () => _ = SendReceiverFromCardAsync());
+        _cardSendBtn.LayoutParameters = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+        elfRow.AddView(_cardSendBtn);
+        var shareBtn = TonalBtn("Share", () => _ = ShareElfAsync());
+        var shbp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WrapContent, ViewGroup.LayoutParams.WrapContent);
+        shbp.LeftMargin = Dp(8);
+        shareBtn.LayoutParameters = shbp;
+        elfRow.AddView(shareBtn);
+        _connBody.AddView(elfRow);
+        _elfStatus = new TextView(this) { Text = "" };
+        _elfStatus.SetTextColor(_subColor); _elfStatus.TextSize = 12;
+        _elfStatus.Visibility = ViewStates.Gone;
+        _connBody.AddView(_elfStatus);
+        connIn.AddView(_connBody);
+        lay.AddView(conn);
+        _connCard = conn;
+        UpdateConnHead();
 
         // library header + add
         var libRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
@@ -585,15 +599,42 @@ public sealed class MainActivity : Activity
                         : ok == false ? Color.ParseColor("#C62828")
                         : Dyn("colorOnSurfaceVariant", Color.Gray));
                 }
-                if (_heroCard != null)
+                if (_connDot != null)
+                    _connDot.SetTextColor(ok == true ? Color.ParseColor("#2E7D32")
+                        : ok == false ? Color.ParseColor("#C62828")
+                        : Dyn("colorOnSurfaceVariant", Color.Gray));
+                if (_connCard != null)
                 {
-                    _heroCard.StrokeWidth = ok == null ? 0 : Dp(2);
+                    _connCard.StrokeWidth = ok == null ? 0 : Dp(2);
                     if (ok != null)
-                        _heroCard.StrokeColor = ok == true ? Color.ParseColor("#2E7D32") : Color.ParseColor("#C62828");
+                        _connCard.StrokeColor = ok == true ? Color.ParseColor("#2E7D32") : Color.ParseColor("#C62828");
                 }
             }
             catch { }
         });
+    }
+
+    void ToggleConnCard()
+    {
+        try
+        {
+            bool open = _connBody?.Visibility != ViewStates.Visible;
+            if (_connBody != null) _connBody.Visibility = open ? ViewStates.Visible : ViewStates.Gone;
+            if (_connChev != null) _connChev.Text = open ? "▾" : "▸";
+            GetPreferences(FileCreationMode.Private).Edit().PutBoolean("conn_open", open).Apply();
+        }
+        catch { }
+    }
+
+    void UpdateConnHead()
+    {
+        try
+        {
+            string ip = (_psIp?.Text ?? "").Trim();
+            if (_connHead != null)
+                _connHead.Text = string.IsNullOrEmpty(ip) || ip.EndsWith(".") ? "Console • not set" : "Console • " + ip;
+        }
+        catch { }
     }
 
     void PaintTabs(int page)
@@ -1557,59 +1598,6 @@ public sealed class MainActivity : Activity
     }
 
     // ---------- bundled ELF: copy to phone storage ----------
-
-    LinearLayout BuildElfCard()
-    {
-        var card = new MaterialCardView(this);
-        var cp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        cp.TopMargin = Dp(12);
-        card.LayoutParameters = cp;
-        card.Radius = Dp(20);
-        card.CardElevation = Dp(0);
-        try { card.SetCardBackgroundColor(Dyn("colorSurfaceContainer", Color.ParseColor("#F3EDF7"))); } catch { }
-        var ci = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        ci.SetPadding(Dp(16), Dp(14), Dp(16), Dp(14));
-        card.AddView(ci);
-        var t = new TextView(this) { Text = "▸ pkg-receiver.elf (bundled)" };
-        t.TextSize = 15; t.SetTypeface(null, TypefaceStyle.Bold);
-        t.Clickable = true;
-        ci.AddView(t);
-        var body = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        body.Visibility = ViewStates.Gone;
-        ci.AddView(body);
-        t.Click += (_, _) =>
-        {
-            bool open = body.Visibility != ViewStates.Visible;
-            body.Visibility = open ? ViewStates.Visible : ViewStates.Gone;
-            try { t.Text = (open ? "▾" : "▸") + " pkg-receiver.elf (bundled)"; } catch { }
-        };
-        var d = new TextView(this)
-        {
-            Text = "Send the PS5 receiver straight to the console through PLDMGR (jailbreak first, PLDMGR running)."
-        };
-        d.SetTextColor(_subColor); d.TextSize = 13;
-        body.AddView(d);
-        var row = new LinearLayout(this) { Orientation = Orientation.Horizontal };
-        var rp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
-        rp.TopMargin = Dp(10);
-        row.LayoutParameters = rp;
-        _cardSendBtn = TonalBtn("Send ELF", () => _ = SendReceiverFromCardAsync());
-        _cardSendBtn.LayoutParameters = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1.4f);
-        var share = TonalBtn("Share ELF", () => _ = ShareElfAsync());
-        var shp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WrapContent, 1f);
-        shp.LeftMargin = Dp(8);
-        share.LayoutParameters = shp;
-        row.AddView(_cardSendBtn); row.AddView(share);
-        body.AddView(row);
-        _elfStatus = new TextView(this) { Text = "" };
-        _elfStatus.SetTextColor(_subColor); _elfStatus.TextSize = 12;
-        _elfStatus.Visibility = ViewStates.Gone;
-        body.AddView(_elfStatus);
-        var wrap = new LinearLayout(this) { Orientation = Orientation.Vertical };
-        wrap.AddView(card);
-        return wrap;
-    }
 
     void ElfSay(bool? ok, string s) => RunOnUiThread(() =>
     {
