@@ -126,7 +126,8 @@ public sealed class MainActivity : Activity
     readonly List<RepoItem> _repo = new();
     bool _repoFetched;
     bool _repoBusy;
-    const string PldmgrRepoUrl = "https://itsplk.github.io/ps5-payloads-mirror/payloads.json";
+    const string PldmgrRepoUrl = "https://cdn.jsdelivr.net/gh/Loopayeh/ps5-payloads@main/payloads.json";
+    const string PldmgrRepoFallbackUrl = "https://itsplk.github.io/ps5-payloads-mirror/payloads.json";
 
     sealed class RepoItem
     {
@@ -937,7 +938,8 @@ public sealed class MainActivity : Activity
             string json = await Task.Run(async () =>
             {
                 using var http = new System.Net.Http.HttpClient() { Timeout = TimeSpan.FromSeconds(30) };
-                return await http.GetStringAsync(PldmgrRepoUrl);
+                try { return await http.GetStringAsync(PldmgrRepoUrl); }
+                catch { return await http.GetStringAsync(PldmgrRepoFallbackUrl); }
             });
             var items = new List<RepoItem>();
             using (var doc = JsonDocument.Parse(json))
