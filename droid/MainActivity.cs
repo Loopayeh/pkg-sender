@@ -28,7 +28,7 @@ using LoopDPI.Core;
 
 namespace PkgSender.Droid;
 
-    [Activity(Label = "LoopFlow • by Loopayeh", MainLauncher = true, Exported = true, Icon = "@drawable/logo")]
+    [Activity(Label = "LoopFlow", MainLauncher = true, Exported = true, Icon = "@drawable/logo")]
 public sealed class MainActivity : Activity
 {
     const int PickReq = 1001;
@@ -235,6 +235,17 @@ public sealed class MainActivity : Activity
 
         var bar = new MaterialToolbar(this);
         bar.Title = "LoopFlow";
+        bar.Subtitle = "by Loopayeh";
+        try
+        {
+            using var ls = GetType().Assembly.GetManifestResourceStream("PkgSender.Droid.logo.png");
+            if (ls != null)
+                using (var bmp = BitmapFactory.DecodeStream(ls))
+                    if (bmp != null && Resources != null)
+                        bar.Logo = new BitmapDrawable(Resources,
+                            Bitmap.CreateScaledBitmap(bmp, Dp(30), Dp(30), true));
+        }
+        catch { }
         try
         {
             bar.SetBackgroundColor(Color.Transparent);
