@@ -280,23 +280,27 @@ public sealed class MainActivity : Activity
         root.AddView(bar);
         // tabs: Packages | Payloads (PLDMGR web UI inside the app)
         var tabRow = new LinearLayout(this) { Orientation = Orientation.Horizontal };
+        tabRow.SetGravity(GravityFlags.CenterVertical);
         var trp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MatchParent, ViewGroup.LayoutParams.WrapContent);
         trp.TopMargin = Dp(8);
         tabRow.LayoutParameters = trp;
         _tabPkgs = TonalBtn("📦 Packages", () => ShowPage(0));
-        _tabPkgs.SetMinimumHeight(Dp(48));
-        _tabPkgs.LayoutParameters = new LinearLayout.LayoutParams(0, Dp(52), 1f);
+        _tabPkgs.TextSize = 13;
+        _tabPkgs.SetMinimumHeight(Dp(40));
+        _tabPkgs.LayoutParameters = new LinearLayout.LayoutParams(0, Dp(46), 1f);
         tabRow.AddView(_tabPkgs);
         _tabPld = TonalBtn("🚀 Payloads", () => ShowPage(1));
-        _tabPld.SetMinimumHeight(Dp(48));
-        var tpp = new LinearLayout.LayoutParams(0, Dp(52), 1f);
+        _tabPld.TextSize = 13;
+        _tabPld.SetMinimumHeight(Dp(40));
+        var tpp = new LinearLayout.LayoutParams(0, Dp(46), 1f);
         tpp.LeftMargin = Dp(8);
         _tabPld.LayoutParameters = tpp;
         tabRow.AddView(_tabPld);
         _tabRepo = TonalBtn("🌐 Web UI", () => ShowPage(2));
-        _tabRepo.SetMinimumHeight(Dp(48));
-        var trp2 = new LinearLayout.LayoutParams(0, Dp(52), 1f);
+        _tabRepo.TextSize = 13;
+        _tabRepo.SetMinimumHeight(Dp(40));
+        var trp2 = new LinearLayout.LayoutParams(0, Dp(46), 1f);
         trp2.LeftMargin = Dp(8);
         _tabRepo.LayoutParameters = trp2;
         tabRow.AddView(_tabRepo);
