@@ -12,6 +12,12 @@ On Linux: the `.deb` from the CI workflow installs to `/usr/lib/pkgsender` with 
 tar -xzf PkgSender-X.Y.Z-linux-x64.tar.gz && ./PkgSender
 ```
 
+On Arch Linux, install the community AUR package with your AUR helper of choice:
+
+```sh
+yay -S pkgsender-bin
+```
+
 > ⚠ **`pkg-receiver.elf` is PS5 ONLY.** PS4 does NOT need any ELF — it uses
 > Remote Package Installer or GoldHEN (see [Tutorial — PS4](#tutorial--ps4)).
 > Sending the ELF to a PS4 will not work.

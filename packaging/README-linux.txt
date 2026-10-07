@@ -26,3 +26,6 @@ Self-update:
   PkgSender.old and removed on next start). Installed via the official
   .deb or an AppImage? Update through your package manager or download
   the new release instead.
+
+Arch Linux:
+  Also available on the AUR as pkgsender-bin (e.g. yay -S pkgsender-bin).
