@@ -202,6 +202,8 @@ public static class PkgReader
         if (!string.IsNullOrEmpty(version))
             pars.Add(new("VERSION", version));
         pars.Add(new("PLATFORM", "PS5"));
+        if (cnt.IsBackport)
+            pars.Add(new("PACKAGE", "Backport (LIH)"));
 
         return new PkgInfo
         {
@@ -211,7 +213,9 @@ public static class PkgReader
             Platform = "PS5",
             Version = version,
             IsDlc = IsDlcHeuristic(title, contentId),
-            Description = $"[PS5 {(cnt.IsMeta ? "Meta" : cnt.IsDebug ? "Debug" : "Retail")}] {title}",
+            Description = cnt.IsBackport
+                ? $"[PS5 Backport] {title}"
+                : $"[PS5 {(cnt.IsMeta ? "Meta" : cnt.IsDebug ? "Debug" : "Retail")}] {title}",
             PackageSize = input.Length,
             IconData = iconBytes.Length > 0 ? iconBytes : null,
             Params = pars,
@@ -224,6 +228,8 @@ public static class PkgReader
         public long CntBase;
         public bool IsDebug;
         public bool IsMeta;
+        /// <summary>LIH wrapper: scene backport (PS5), no retail issuer.</summary>
+        public bool IsBackport;
         public string ContentId = "";
         /// <summary>Uppercase-hex header digest (CNT+0xFE0, 32 bytes).</summary>
         public string Digest = "";
@@ -246,7 +252,7 @@ public static class PkgReader
                 if (input.Read(magic) != 4)
                     return null;
                 long cntBase;
-                bool isDebug, isMeta;
+                bool isDebug, isMeta, isBackport = false;
                 if (magic[0] == 0x7F && magic[1] == (byte)'F' && magic[2] == (byte)'I' && magic[3] == (byte)'H')
                 {
                     Span<byte> fih = stackalloc byte[0x60];
@@ -256,6 +262,24 @@ public static class PkgReader
                     isDebug = fih[0x05] == 0x00;
                     isMeta = false;
                     ulong emb = ReadU64LE(fih.Slice(0x58, 8));
+                    if (emb == 0 || emb > (ulong)input.Length - 0x5A0)
+                        return null;
+                    cntBase = (long)emb;
+                }
+                else if (magic[0] == 0x7F && magic[1] == (byte)'L' && magic[2] == (byte)'I' && magic[3] == (byte)'H')
+                {
+                    // LIH: scene backport wrapper. Same header layout as
+                    // FIH except the embedded CNT offset lives at 0x30
+                    // (FIH: 0x58); the container itself parses as standard
+                    // CNT (mirrors pkg-viewer's parser).
+                    Span<byte> lih = stackalloc byte[0x60];
+                    input.Position = 0;
+                    if (input.Read(lih) != lih.Length)
+                        return null;
+                    isDebug = lih[0x05] == 0x00;
+                    isMeta = false;
+                    isBackport = true;
+                    ulong emb = ReadU64LE(lih.Slice(0x30, 8));
                     if (emb == 0 || emb > (ulong)input.Length - 0x5A0)
                         return null;
                     cntBase = (long)emb;
@@ -292,7 +316,7 @@ public static class PkgReader
                 }
                 var names = new Dictionary<uint, string>();
                 var nt = raw.FirstOrDefault(e => e.Id == 0x0200);
-                if (nt.DataSize > 0 && nt.DataSize <= 4 * 1024 * 1024 && (nt.Flags & 0x80000000) == 0)
+                if (nt.DataSize > 0 && nt.DataSize <= 4 * 1024 * 1024)
                 {
                     byte[] nb = new byte[nt.DataSize];
                     input.Position = cntBase + nt.DataOff;
@@ -315,6 +339,7 @@ public static class PkgReader
                     CntBase = cntBase,
                     IsDebug = isDebug,
                     IsMeta = isMeta,
+                    IsBackport = isBackport,
                     ContentId = ReadAscii(hdr, 0x40, 0x30),
                     Digest = ReadDigest(input, cntBase),
                 };
@@ -330,15 +355,30 @@ public static class PkgReader
 
         public (uint Id, string Name, uint Flags, uint DataOff, uint DataSize)? Find(uint id, string name)
         {
-            foreach (var e in Entries)
+            // Unencrypted entries first (retail layout). Scene/backport
+            // repacks sometimes mark param.sfo/icon entries with the
+            // encrypted flag while storing plain bytes — the second pass
+            // over flagged entries catches those (pkg-viewer reads them
+            // the same way). Genuinely encrypted bytes just fail the
+            // SFO/PNG checks further down.
+            for (int pass = 0; pass < 2; pass++)
             {
-                if (e.Id == id && (e.Flags & 0x80000000) == 0)
-                    return e;
+                bool plain = pass == 0;
+                foreach (var e in Entries)
+                {
+                    if (e.Id == id && (plain ? (e.Flags & 0x80000000) == 0 : true))
+                        return e;
+                }
             }
-            foreach (var e in Entries)
+            for (int pass = 0; pass < 2; pass++)
             {
-                if ((e.Flags & 0x80000000) == 0 && string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
-                    return e;
+                bool plain = pass == 0;
+                foreach (var e in Entries)
+                {
+                    if ((plain ? (e.Flags & 0x80000000) == 0 : true) &&
+                        string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                        return e;
+                }
             }
             return null;
         }
@@ -347,7 +387,11 @@ public static class PkgReader
         {
             try
             {
-                if (e.DataSize == 0 || e.DataSize > cap || (e.Flags & 0x80000000) != 0)
+                // The encrypted flag is not honored here: backport/scene
+                // repacks flag entries whose bytes are actually plain
+                // (verified against pkg-viewer), and encrypted garbage
+                // simply fails the caller's magic/SFO checks.
+                if (e.DataSize == 0 || e.DataSize > cap)
                     return Array.Empty<byte>();
                 byte[] b = new byte[e.DataSize];
                 _input.Position = CntBase + e.DataOff;
@@ -375,22 +419,32 @@ public static class PkgReader
                 return b;
             return null;
         }
-        foreach (var e in cnt.Entries)
+        // Same two-pass flag handling as Find(): plain entries first,
+        // flagged (scene/backport repack) entries as fallback.
+        for (int pass = 0; pass < 2; pass++)
         {
-            if (e.Id == 0x1200 && (e.Flags & 0x80000000) == 0)
+            bool plain = pass == 0;
+            foreach (var e in cnt.Entries)
             {
-                var hit = Try(e);
-                if (hit != null)
-                    return hit;
+                if (e.Id == 0x1200 && (plain ? (e.Flags & 0x80000000) == 0 : true))
+                {
+                    var hit = Try(e);
+                    if (hit != null)
+                        return hit;
+                }
             }
         }
-        foreach (var e in cnt.Entries)
+        for (int pass = 0; pass < 2; pass++)
         {
-            if (e.Id is >= 0x1201 and <= 0x1220 && (e.Flags & 0x80000000) == 0)
+            bool plain = pass == 0;
+            foreach (var e in cnt.Entries)
             {
-                var hit = Try(e);
-                if (hit != null)
-                    return hit;
+                if (e.Id is >= 0x1201 and <= 0x1220 && (plain ? (e.Flags & 0x80000000) == 0 : true))
+                {
+                    var hit = Try(e);
+                    if (hit != null)
+                        return hit;
+                }
             }
         }
         return null;
