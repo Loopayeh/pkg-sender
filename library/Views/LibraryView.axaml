@@ -77,7 +77,7 @@
                     VerticalAlignment="Center" Foreground="#8B93A5" FontSize="12"
                     ToolTip.Tip="Show only base games — click 🔗×N on a card to see its updates/DLCs"/>
         </Grid>
-        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
           <Grid Grid.Column="0" Margin="0,0,8,0">
             <TextBox Text="{Binding Search, Mode=TwoWay}" Watermark="🔍 Search title, ID…" Padding="10,8,36,8"/>
             <Button Content="✕" Name="BtnClearSearch" HorizontalAlignment="Right" VerticalAlignment="Center"
@@ -88,7 +88,8 @@
           <Button Grid.Column="2" Content="Copy images" Name="BtnCopy" Classes="ghost" Margin="0,0,8,0" IsEnabled="False" ToolTip.Tip="Copy selected image files (.exfat/.ffpkg/.ffpfsc) to /data/homebrew on the console"/>
           <Button Grid.Column="3" Content="Share to console" Name="BtnShare" Classes="ghost" Margin="0,0,8,0" ToolTip.Tip="Show this library in the console browser (pkg remote installer page pulls the list + covers from this PC)"/>
           <Button Grid.Column="4" Content="⏸ Pause all" Name="BtnPauseAll" Classes="ghost" Margin="0,0,8,0" ToolTip.Tip="Pause everything (resumable) — becomes Resume all"/>
-          <Button Grid.Column="5" Content="Clear done" Name="BtnClearDone" ToolTip.Tip="Remove finished rows only — never touches active downloads"/>
+          <Button Grid.Column="5" Content="⟳ Retry failed" Name="BtnRetryFailed" Classes="ghost" Margin="0,0,8,0" IsEnabled="False" ToolTip.Tip="Re-queue every failed row at once — no clicking ⟳ Reinstall one by one"/>
+          <Button Grid.Column="6" Content="Clear done" Name="BtnClearDone" ToolTip.Tip="Remove finished rows only — never touches active downloads"/>
         </Grid>
       </Grid>
     </Border>

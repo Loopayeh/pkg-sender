@@ -226,6 +226,7 @@ public partial class LibraryView : UserControl
             _ = CheckUpdatesAsync(manual: false);
         this.FindControl<Button>("BtnShare").Click += (_, _) => ToggleShare();
         this.FindControl<Button>("BtnPauseAll").Click += (_, _) => TogglePauseAll();
+        this.FindControl<Button>("BtnRetryFailed").Click += (_, _) => RetryFailedAll();
         this.FindControl<Button>("BtnClearDone").Click += (_, _) =>
         {
             // Finished rows go; stuck rows (sending/queued with no live
@@ -875,6 +876,30 @@ public partial class LibraryView : UserControl
         UpdateQueueLabel();
     }
 
+    /// <summary>
+    /// Restart all failed rows at once (issue #18): the same path as the
+    /// per-row ⟳ Reinstall, repeated for every failed row — no clicking
+    /// through a large batch one by one. Push order keeps the visual
+    /// order (rows are re-queued in reverse, each landing at the front).
+    /// Called on UI thread.
+    /// </summary>
+    private void RetryFailedAll()
+    {
+        List<QueueItem> failed;
+        lock (_runLock)
+        {
+            failed = _m.Queue.Where(q => q.State == "failed").ToList();
+        }
+        if (failed.Count == 0)
+        {
+            _m.Status = "Nothing to retry — no failed rows.";
+            return;
+        }
+        foreach (var row in Enumerable.Reverse(failed))
+            ResendRow(row);
+        _m.Status = $"Retrying {failed.Count} failed item(s)…";
+    }
+
     private TopLevel Top => TopLevel.GetTopLevel(this)!;
 
     private void Post(Action a) => Dispatcher.UIThread.Post(a);
@@ -1462,6 +1487,10 @@ public partial class LibraryView : UserControl
             var b = this.FindControl<Button>("BtnPauseAll");
             if (b != null)
                 b.Content = label;
+            // Retry-failed lights up only when there is something to retry.
+            var rb = this.FindControl<Button>("BtnRetryFailed");
+            if (rb != null)
+                rb.IsEnabled = failed > 0;
         });
     }
 
