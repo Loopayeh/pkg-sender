@@ -73,9 +73,17 @@
           <Border Grid.Column="3" Background="#2A2A2A" Width="1" Margin="4,4,12,4"/>
           <ComboBox Grid.Column="4" Name="PlatformBox" Width="110" Margin="0,0,8,0"/>
           <ComboBox Grid.Column="5" Name="SortBox" Width="130" Margin="0,0,8,0" ToolTip.Tip="Sort library"/>
-          <CheckBox Grid.Column="6" Content="Hide DLC/updates" IsChecked="{Binding HideExtras, Mode=TwoWay}"
-                    VerticalAlignment="Center" Foreground="#8B93A5" FontSize="12"
-                    ToolTip.Tip="Show only base games — click 🔗×N on a card to see its updates/DLCs"/>
+          <StackPanel Grid.Column="6" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+            <CheckBox Content="Hide games" IsChecked="{Binding HideGames, Mode=TwoWay}"
+                      Foreground="#8B93A5" FontSize="12"
+                      ToolTip.Tip="Hide base-game cards — updates and DLC stay visible (family view 🔗 ignores these filters)"/>
+            <CheckBox Content="Hide updates" IsChecked="{Binding HideUpdates, Mode=TwoWay}"
+                      Foreground="#8B93A5" FontSize="12"
+                      ToolTip.Tip="Hide update/patch cards (family view 🔗 ignores these filters)"/>
+            <CheckBox Content="Hide DLC" IsChecked="{Binding HideDlcs, Mode=TwoWay}"
+                      Foreground="#8B93A5" FontSize="12"
+                      ToolTip.Tip="Hide DLC cards (family view 🔗 ignores these filters)"/>
+          </StackPanel>
         </Grid>
         <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
           <Grid Grid.Column="0" Margin="0,0,8,0">

@@ -122,8 +122,14 @@ public sealed class LibraryViewModel : ReactiveObject
     private string _sortMode = "Name";
     public string SortMode { get => _sortMode; set => this.RaiseAndSetIfChanged(ref _sortMode, value); }
 
-    private bool _hideExtras;
-    public bool HideExtras { get => _hideExtras; set => this.RaiseAndSetIfChanged(ref _hideExtras, value); }
+    private bool _hideGames;
+    public bool HideGames { get => _hideGames; set => this.RaiseAndSetIfChanged(ref _hideGames, value); }
+
+    private bool _hideUpdates;
+    public bool HideUpdates { get => _hideUpdates; set => this.RaiseAndSetIfChanged(ref _hideUpdates, value); }
+
+    private bool _hideDlcs;
+    public bool HideDlcs { get => _hideDlcs; set => this.RaiseAndSetIfChanged(ref _hideDlcs, value); }
 
     private bool _sequentialMode;
     public bool SequentialMode { get => _sequentialMode; set => this.RaiseAndSetIfChanged(ref _sequentialMode, value); }

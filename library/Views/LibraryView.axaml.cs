@@ -130,7 +130,9 @@ public partial class LibraryView : UserControl
                 _searchTimer.Stop();
                 _searchTimer.Start();
             }
-            else if (e.PropertyName == nameof(LibraryViewModel.HideExtras))
+            else if (e.PropertyName is nameof(LibraryViewModel.HideGames)
+                     or nameof(LibraryViewModel.HideUpdates)
+                     or nameof(LibraryViewModel.HideDlcs))
                 ApplyFilter();
             else if (e.PropertyName == nameof(LibraryViewModel.SequentialMode))
                 RefreshReorderFlags();
@@ -1287,12 +1289,14 @@ public partial class LibraryView : UserControl
         string raw = (_m.Search ?? "").Trim();
         string pf = _m.PlatformFilter ?? "All";
         string sort = _m.SortMode ?? "Name";
-        bool hideExtras = _m.HideExtras;
+        bool hideGames = _m.HideGames;
+        bool hideUpdates = _m.HideUpdates;
+        bool hideDlcs = _m.HideDlcs;
         try { snapshot = _all.ToArray(); }
         catch { return; }
         // Repeat of the exact same view (e.g. Show all twice): skip the
         // GroupBy/sort entirely and re-apply the cached rows.
-        string key = $"{_allVersion}|{q}|{pf}|{sort}|{hideExtras}";
+        string key = $"{_allVersion}|{q}|{pf}|{sort}|{hideGames}|{hideUpdates}|{hideDlcs}";
         if (_filterCacheValid && key == _filterCacheKey)
         {
             var cached = _filterCache;
@@ -1304,7 +1308,7 @@ public partial class LibraryView : UserControl
             });
             return;
         }
-        var computed = await Task.Run(() => ComputeFiltered(snapshot, q, pf, sort, hideExtras));
+        var computed = await Task.Run(() => ComputeFiltered(snapshot, q, pf, sort, hideGames, hideUpdates, hideDlcs));
         if (gen != Volatile.Read(ref _filterGen))
             return; // superseded by newer input
         Post(() =>
@@ -1353,7 +1357,8 @@ public partial class LibraryView : UserControl
     }
 
     /// <summary>Pure filter+sort over a snapshot (background-thread safe).</summary>
-    private static (List<GameItem> Rows, (int Ps5, int Ps4, int Fams) Counts) ComputeFiltered(GameItem[] all, string q, string pf, string sort, bool hideExtras)
+    private static (List<GameItem> Rows, (int Ps5, int Ps4, int Fams) Counts) ComputeFiltered(
+        GameItem[] all, string q, string pf, string sort, bool hideGames, bool hideUpdates, bool hideDlcs)
     {
         int ps5 = 0, ps4 = 0;
         var famSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1372,35 +1377,21 @@ public partial class LibraryView : UserControl
             if (q.Length == 0 || g.SearchHay.Contains(q, StringComparison.Ordinal))
                 list.Add(g);
         }
-        // Hide DLC/updates mode: collapse each family to its base Game(s).
-        // Clicking 🔗 sets Search = FamilyKey -> exact family view, which
-        // bypasses the collapse so updates/DLCs become visible.
-        if (hideExtras)
+        // Per-kind hide filters (issue #18): games, updates and DLCs each
+        // hide on their own; images always stay. Family view (search ==
+        // family key, e.g. via the 🔗 chip) bypasses them so a family
+        // card click still shows everything that belongs together.
+        bool isFamilyView = q.Length > 0 &&
+            all.Any(a => string.Equals(a.FamilyKey.ToLowerInvariant(), q, StringComparison.Ordinal));
+        if (!isFamilyView && (hideGames || hideUpdates || hideDlcs))
         {
-            bool isFamilyView = q.Length > 0 &&
-                all.Any(a => string.Equals(a.FamilyKey.ToLowerInvariant(), q, StringComparison.Ordinal));
-            if (!isFamilyView)
+            list = list.Where(g => g.Role switch
             {
-                var collapsed = new List<GameItem>();
-                foreach (var grp in list.GroupBy(g => g.FamilyKey))
-                {
-                    if (grp.Key.StartsWith("FILE:", StringComparison.Ordinal))
-                    {
-                        collapsed.AddRange(grp);
-                        continue;
-                    }
-                    var bases = grp.Where(g => g.Role == "Game").ToList();
-                    var images = grp.Where(g => g.Role == "Image").ToList();
-                    if (bases.Count > 0)
-                    {
-                        collapsed.AddRange(bases);
-                        collapsed.AddRange(images); // images stay visible next to their game
-                    }
-                    else
-                        collapsed.AddRange(grp); // DLC-only family: nothing to collapse to
-                }
-                list = collapsed;
-            }
+                "Game" => !hideGames,
+                "Patch" => !hideUpdates,
+                "DLC" => !hideDlcs,
+                _ => true, // Image and anything else stays visible
+            }).ToList();
         }
         IEnumerable<GameItem> MemberOrder(IEnumerable<GameItem> ms) => ms
             .OrderBy(g => RoleRank(g.Role))
