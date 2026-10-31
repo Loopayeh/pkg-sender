@@ -211,6 +211,7 @@ public partial class LibraryView : UserControl
             _ = AutoDetectAsync();
         }
         this.FindControl<Button>("BtnAddDrive").Click += async (_, _) => await AddDriveAsync();
+        this.FindControl<Button>("BtnClearLibrary").Click += async (_, _) => await ClearLibraryAsync();
         this.FindControl<Button>("BtnTest").Click += async (_, _) => await TestConnectionAsync();
         this.FindControl<Button>("BtnScan").Click += async (_, _) => await ScanFoldersAsync();
         this.FindControl<Button>("BtnSend").Click += (_, _) => EnqueuePkgs();
@@ -1062,6 +1063,35 @@ public partial class LibraryView : UserControl
             return;
         }
         await ScanAsync(folders, merge: false);
+    }
+
+    /// <summary>
+    /// Fresh start (issue #18): drop every cached game AND all scan
+    /// folders/drives. Files on disk are untouched; the install queue
+    /// keeps running — only the library view + cache are wiped.
+    /// </summary>
+    private async Task ClearLibraryAsync()
+    {
+        var owner = Top as Window;
+        if (owner == null)
+            return;
+        int folders = _roots.Count(r => !IsDriveRoot(r));
+        int drives = _roots.Count - folders;
+        var dlg = new ConfirmDialog("Clear library?",
+            $"Removes all {_all.Count} cached entries and {folders} scan folder(s) / {drives} drive(s) from the list.\n" +
+            "Files on disk are not touched — add folders or drives and Scan to rebuild.\n" +
+            "Running installs keep going.",
+            okLabel: "Clear");
+        await dlg.ShowDialog(owner);
+        if (!dlg.Confirmed)
+            return;
+        _all.Clear();
+        _roots = new List<string>();
+        LibraryScanner.ClearCache();
+        _m.Search = "";
+        BumpLibraryVersion();
+        ImmediateFilter();
+        _m.Status = "Library cleared — add folders or drives for a fresh start.";
     }
 
     /// <summary>

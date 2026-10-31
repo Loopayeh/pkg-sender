@@ -49,6 +49,19 @@ public static class LibraryScanner
         }
     }
 
+    /// <summary>Fresh start: drop roots + cached games. Files on disk are untouched.</summary>
+    public static void ClearCache()
+    {
+        try
+        {
+            if (File.Exists(CachePath))
+                File.Delete(CachePath);
+        }
+        catch
+        {
+        }
+    }
+
     private static Dictionary<string, CachedGame> LoadCacheGames()
     {
         try
