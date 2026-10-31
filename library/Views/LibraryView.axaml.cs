@@ -917,11 +917,28 @@ public partial class LibraryView : UserControl
 
     private async Task AddFolderAsync(string title)
     {
-        var folders = await Top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        var storage = Top.StorageProvider;
+        var opts = new FolderPickerOpenOptions
         {
             Title = title,
             AllowMultiple = true,
-        });
+        };
+        // Reopen where the last pick happened (its parent folder) so big
+        // trees don't have to be scrolled through again (issue #18).
+        try
+        {
+            string? last = AppSettings.Load().LastPickFolder;
+            if (!string.IsNullOrEmpty(last) && Directory.Exists(last))
+            {
+                var start = await storage.TryGetFolderFromPathAsync(last);
+                if (start != null)
+                    opts.SuggestedStartLocation = start;
+            }
+        }
+        catch
+        {
+        }
+        var folders = await storage.OpenFolderPickerAsync(opts);
         var added = new List<string>();
         foreach (var f in folders)
         {
@@ -930,6 +947,25 @@ public partial class LibraryView : UserControl
             {
                 _roots.Add(p);
                 added.Add(p);
+            }
+        }
+        // Remember the browsing location (parent of the last pick) even
+        // when the folder was already in the list.
+        if (folders.Count > 0)
+        {
+            try
+            {
+                string last = folders[^1].Path.LocalPath;
+                string? where = Directory.GetParent(last)?.FullName ?? last;
+                if (Directory.Exists(where))
+                {
+                    var keep = AppSettings.Load();
+                    keep.LastPickFolder = where;
+                    keep.Save();
+                }
+            }
+            catch
+            {
             }
         }
         if (added.Count > 0)

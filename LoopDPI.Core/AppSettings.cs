@@ -12,6 +12,8 @@ public sealed class AppSettings
     public int ChunkSize { get; set; } = 2 * 1024 * 1024;
     public bool UpdateCheck { get; set; } = true;
     public bool AboutShown { get; set; } = false;
+    /// <summary>Last folder-picker location (parent of the last pick) — the picker reopens there.</summary>
+    public string LastPickFolder { get; set; } = "";
 
     public AppSettings()
     {
@@ -46,6 +48,8 @@ public sealed class AppSettings
                     s.ChunkSize = loaded.ChunkSize;
                 s.UpdateCheck = loaded.UpdateCheck;
                 s.AboutShown = loaded.AboutShown;
+                if (!string.IsNullOrWhiteSpace(loaded.LastPickFolder))
+                    s.LastPickFolder = loaded.LastPickFolder.Trim();
                 return s;
             }
         }
