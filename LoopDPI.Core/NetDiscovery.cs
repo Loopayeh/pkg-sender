@@ -15,7 +15,8 @@ namespace LoopDPI.Core;
 /// One active IPv4 NIC with its REAL netmask. Network/broadcast/host range
 /// are computed from address+mask bytes — never assume /24.
 /// </summary>
-public sealed record LanNetwork(string InterfaceName, string Description, IPAddress Address, IPAddress Mask)
+public sealed record LanNetwork(string InterfaceName, string Description, IPAddress Address, IPAddress Mask,
+    NetworkInterfaceType Type = NetworkInterfaceType.Unknown)
 {
     public IPAddress Network { get; } = ApplyMask(Address, Mask);
     public IPAddress Broadcast { get; } = ApplyBroadcast(Address, Mask);
@@ -135,7 +136,12 @@ public static class NetDiscovery
     }
     public const int MaxHostsPerNic = 4096;
 
-    /// <summary>Every active non-loopback IPv4 NIC with its own subnet.</summary>
+    /// <summary>Every active non-loopback IPv4 NIC with its own subnet.
+    /// Wired adapters come first: with LAN + Wi-Fi both up the console
+    /// sits on the wired subnet, so it must be nets[0] (default PC IP,
+    /// first dropdown entry) instead of whatever the OS happened to
+    /// enumerate first. Wireless follows, then other link types;
+    /// virtual switches always last.</summary>
     public static List<LanNetwork> GetLanNetworks()
     {
         var list = new List<LanNetwork>();
@@ -161,13 +167,32 @@ public static class NetDiscovery
                     if (ab[0] == 169 && ab[1] == 254) continue;
                     string desc = "";
                     try { desc = nic.Description ?? ""; } catch { }
-                    list.Add(new LanNetwork(nic.Name, desc, uni.Address, uni.IPv4Mask));
+                    list.Add(new LanNetwork(nic.Name, desc, uni.Address, uni.IPv4Mask, nic.NetworkInterfaceType));
                 }
             }
             catch { }
         }
-        return list;
+        return list.OrderBy(LinkRank).ToList();
     }
+
+    /// <summary>Sort rank: wired links (0) &lt; wireless (1) &lt; other real links (2) &lt; virtual switches (3).</summary>
+    private static int LinkRank(LanNetwork n)
+    {
+        if (IsVirtual(n)) return 3;
+        return n.Type switch
+        {
+            NetworkInterfaceType.Ethernet or NetworkInterfaceType.GigabitEthernet
+                or NetworkInterfaceType.FastEthernetT or NetworkInterfaceType.FastEthernetFx => 0,
+            NetworkInterfaceType.Wireless80211 => 1,
+            _ => 2,
+        };
+    }
+
+    private static readonly string[] VirtualMarks =
+    {
+        "virtual", "hyper-v", "hyperv", "wsl", "vmware",
+        "virtualbox", "vpn", "pseudo", "wireguard", "tailscale", "tap-"
+    };
 
     /// <summary>
     /// Virtual switches (WSL/Hyper-V/VM/VPN) never carry a console.
@@ -176,9 +201,7 @@ public static class NetDiscovery
     public static bool IsVirtual(LanNetwork n)
     {
         string s = ((n.InterfaceName ?? "") + " " + (n.Description ?? "")).ToLowerInvariant();
-        string[] marks = { "virtual", "hyper-v", "hyperv", "wsl", "vmware",
-            "virtualbox", "vpn", "pseudo", "wireguard", "tailscale", "tap-" };
-        return marks.Any(s.Contains);
+        return VirtualMarks.Any(s.Contains);
     }
 
     /// <summary>Pick the PC address on the same subnet as the console.</summary>
@@ -190,7 +213,11 @@ public static class NetDiscovery
             var same = nets.FirstOrDefault(n => n.Contains(ps));
             if (same != null) return same.Address.ToString();
         }
-        return nets[0].Address.ToString();
+        // No console hint: default to the first non-virtual adapter —
+        // GetLanNetworks() puts wired links first, so LAN beats Wi-Fi
+        // even when the OS enumerated Wi-Fi first (issue #16).
+        var best = nets.FirstOrDefault(n => !IsVirtual(n)) ?? nets[0];
+        return best.Address.ToString();
     }
 
     /// <summary>Listen for receiver UDP beacons for the given duration.</summary>
